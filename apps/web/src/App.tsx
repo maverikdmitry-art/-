@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from './components/Navbar';
 import { OverviewView } from './views/OverviewView';
 import { TransactionsView } from './views/TransactionsView';
@@ -17,21 +17,31 @@ import { TransferModal } from './components/TransferModal';
 import { RevisionModal } from './components/RevisionModal';
 import { GoalContributionModal } from './components/GoalContributionModal';
 import { QuickBotInputModal } from './components/QuickBotInputModal';
+import { AuthGate } from './components/AuthGate';
 
-import {
-  clearTestDataOnly,
-  exportBackupJson,
-  exportTransactionsCsv,
-  loadStore,
-  resetToDefaults,
-  saveStore,
-} from './services/storage';
+import { exportBackupJson, exportTransactionsCsv } from './services/storage';
+import { isSupabaseConfigured } from './services/supabaseClient';
+import { getSession, onAuthChange, signOut } from './services/auth';
+import * as data from './services/data';
 import { Account, AppSettings, AppStore, Category, CategoryGroup, Goal, GoalContribution, RecurringPayment, Transaction, Transfer } from './types';
 import { calculateAccountBalance } from './services/calculations';
-import { Bell, CheckCircle2 } from 'lucide-react';
+import { Bell, CheckCircle2, LogOut, Loader2 } from 'lucide-react';
 
+/**
+ * Корневой компонент дашборда.
+ *
+ * Данные — единственный источник правды Supabase (см. services/data.ts).
+ * Views работают с готовым объектом `AppStore` в памяти; все мутации —
+ * асинхронные обращения к Supabase, после которых store перечитывается.
+ * Доступ только для авторизованных (RLS), поэтому при отсутствии сессии
+ * показываем экран входа (AuthGate).
+ */
 export default function App() {
-  const [store, setStore] = useState<AppStore>(() => loadStore());
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [authed, setAuthed] = useState(false);
+  const [store, setStore] = useState<AppStore | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [currentTab, setCurrentTab] = useState<string>('overview');
   const [selectedUserId, setSelectedUserId] = useState<number | 'all'>('all');
 
@@ -53,338 +63,196 @@ export default function App() {
     }, 4500);
   };
 
-  // Sync state to LocalStorage
-  const updateStore = (updater: (prev: AppStore) => AppStore) => {
-    setStore((prev) => {
-      const next = updater(prev);
-      saveStore(next);
-      return next;
+  // Перечитать store из Supabase.
+  const reload = useCallback(async () => {
+    try {
+      setLoadError(null);
+      const next = await data.loadStore();
+      setStore(next);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить данные.');
+    }
+  }, []);
+
+  // Проверка сессии при монтировании + подписка на изменения.
+  useEffect(() => {
+    let active = true;
+    getSession().then((session) => {
+      if (!active) return;
+      setAuthed(Boolean(session));
+      setSessionChecked(true);
     });
+    const unsubscribe = onAuthChange((session) => {
+      setAuthed(Boolean(session));
+      if (!session) setStore(null);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  // Загружаем данные после входа.
+  useEffect(() => {
+    if (authed && isSupabaseConfigured()) {
+      void reload();
+    }
+  }, [authed, reload]);
+
+  // Экран входа, если нет сессии.
+  if (!sessionChecked) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+  if (!authed || !isSupabaseConfigured()) {
+    return <AuthGate configured={isSupabaseConfigured()} />;
+  }
+
+  // Загрузка / ошибка данных.
+  if (!store) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-300 flex flex-col items-center justify-center gap-3 p-4">
+        {loadError ? (
+          <>
+            <p className="text-rose-300 text-sm">Ошибка загрузки данных.</p>
+            <p className="text-xs text-slate-500 max-w-md text-center">{loadError}</p>
+            <button
+              onClick={() => void reload()}
+              className="mt-2 px-4 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg cursor-pointer"
+            >
+              Повторить
+            </button>
+          </>
+        ) : (
+          <div className="flex items-center gap-2 text-sm">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Загрузка данных…
+          </div>
+        )}
+      </div>
+    );
+  }
+
+
+  // Выполнить асинхронную мутацию в Supabase, перечитать store и показать тост.
+  const run = async (action: () => Promise<void>, successMessage: string) => {
+    try {
+      await action();
+      await reload();
+      showToast(successMessage);
+    } catch (err) {
+      showToast(`❌ ${err instanceof Error ? err.message : 'Ошибка сохранения'}`);
+    }
   };
 
   // --- Transactions Handlers ---
   const handleSaveTransaction = (txData: Partial<Transaction>) => {
-    updateStore((prev) => {
-      if (txData.id) {
-        // Edit existing
-        const updated = prev.transactions.map((t) =>
-          t.id === txData.id
-            ? ({
-                ...t,
-                ...txData,
-                updated_at: new Date().toISOString(),
-              } as Transaction)
-            : t
-        );
-        return { ...prev, transactions: updated };
-      } else {
-        // Create new
-        const newId = prev.transactions.length > 0 ? Math.max(...prev.transactions.map((t) => t.id)) + 1 : 1;
-        const newTx: Transaction = {
-          id: newId,
-          type: txData.type || 'expense',
-          amount: txData.amount || 0,
-          currency: txData.currency || 'UAH',
-          account_id: txData.account_id || prev.accounts[0]?.id || 1,
-          category_id: txData.category_id || null,
-          user_id: txData.user_id || 1,
-          description: txData.description || 'Операция',
-          note: txData.note || '',
-          occurred_at: txData.occurred_at || new Date().toISOString(),
-          status: txData.status || 'ok',
-          source: txData.source || 'dashboard',
-          raw_text: txData.raw_text ?? null,
-          telegram_chat_id: txData.telegram_chat_id ?? null,
-          telegram_message_id: txData.telegram_message_id ?? null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        return { ...prev, transactions: [newTx, ...prev.transactions] };
-      }
-    });
-    showToast('Операция успешно сохранена');
+    void run(() => data.saveTransaction(txData), 'Операция успешно сохранена');
   };
 
   const handleDeleteTransaction = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      transactions: prev.transactions.filter((t) => t.id !== id),
-    }));
-    showToast('Операция удалена. Баланс счёта пересчитан.');
+    void run(() => data.deleteTransaction(id), 'Операция удалена. Баланс счёта пересчитан.');
   };
 
   const handleBulkDelete = (ids: number[]) => {
-    updateStore((prev) => ({
-      ...prev,
-      transactions: prev.transactions.filter((t) => !ids.includes(t.id)),
-    }));
-    showToast(`Удалено операций: ${ids.length}`);
+    void run(() => data.bulkDeleteTransactions(ids), `Удалено операций: ${ids.length}`);
   };
 
   const handleBulkMarkOk = (ids: number[]) => {
-    updateStore((prev) => ({
-      ...prev,
-      transactions: prev.transactions.map((t) =>
-        ids.includes(t.id) ? { ...t, status: 'ok' as const, updated_at: new Date().toISOString() } : t
-      ),
-    }));
-    showToast(`Операции (${ids.length} шт) подтверждены`);
+    void run(() => data.bulkMarkOk(ids), `Операции (${ids.length} шт) подтверждены`);
   };
+
 
   // --- Transfers Handlers ---
   const handleSaveTransfer = (transferData: Omit<Transfer, 'id'>) => {
-    updateStore((prev) => {
-      const newId = prev.transfers.length > 0 ? Math.max(...prev.transfers.map((t) => t.id)) + 1 : 1;
-      const newTr: Transfer = {
-        id: newId,
-        ...transferData,
-      };
-      return { ...prev, transfers: [newTr, ...prev.transfers] };
-    });
-    showToast('Перевод между счетами выполнен');
+    void run(() => data.saveTransfer(transferData), 'Перевод между счетами выполнен');
   };
 
   const handleDeleteTransfer = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      transfers: prev.transfers.filter((t) => t.id !== id),
-    }));
-    showToast('Перевод удалён');
+    void run(() => data.deleteTransfer(id), 'Перевод удалён');
   };
 
   // --- Revision / Adjustment Handler ---
   const handleSaveAdjustment = (adjData: Omit<Transaction, 'id' | 'created_at' | 'updated_at'>) => {
-    updateStore((prev) => {
-      const newId = prev.transactions.length > 0 ? Math.max(...prev.transactions.map((t) => t.id)) + 1 : 1;
-      const newTx: Transaction = {
-        id: newId,
-        ...adjData,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      return { ...prev, transactions: [newTx, ...prev.transactions] };
-    });
-    showToast('Сверка баланса зафиксирована корректирующей проводкой');
+    void run(
+      () => data.saveTransaction({ ...adjData, type: 'adjustment' }),
+      'Сверка баланса зафиксирована корректирующей проводкой'
+    );
   };
 
   // --- Goals Handlers ---
   const handleSaveGoalContribution = (contribData: Omit<GoalContribution, 'id' | 'created_at'>) => {
-    updateStore((prev) => {
-      const newId = prev.goal_contributions.length > 0 ? Math.max(...prev.goal_contributions.map((c) => c.id)) + 1 : 1;
-      const newContrib: GoalContribution = {
-        id: newId,
-        ...contribData,
-        created_at: new Date().toISOString(),
-      };
-      return { ...prev, goal_contributions: [newContrib, ...prev.goal_contributions] };
-    });
-    showToast(contribData.amount >= 0 ? 'Взнос в цель зафиксирован' : 'Снятие с цели зафиксировано');
+    void run(
+      () => data.saveContribution(contribData),
+      contribData.amount >= 0 ? 'Взнос в цель зафиксирован' : 'Снятие с цели зафиксировано'
+    );
   };
 
   const handleSaveGoal = (goalData: Partial<Goal>) => {
-    updateStore((prev) => {
-      if (goalData.id) {
-        return {
-          ...prev,
-          goals: prev.goals.map((g) => (g.id === goalData.id ? ({ ...g, ...goalData } as Goal) : g)),
-        };
-      } else {
-        const newId = prev.goals.length > 0 ? Math.max(...prev.goals.map((g) => g.id)) + 1 : 1;
-        const newGoal: Goal = {
-          id: newId,
-          name: goalData.name || 'Новая цель',
-          target_amount: goalData.target_amount || 10000,
-          currency: goalData.currency || 'UAH',
-          is_active: true,
-          created_at: new Date().toISOString(),
-        };
-        return { ...prev, goals: [...prev.goals, newGoal] };
-      }
-    });
-    showToast('Цель сохранена');
+    void run(() => data.saveGoal(goalData), 'Цель сохранена');
   };
 
   const handleDeleteGoal = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      goals: prev.goals.filter((g) => g.id !== id),
-      goal_contributions: prev.goal_contributions.filter((c) => c.goal_id !== id),
-    }));
-    showToast('Цель удалена');
+    void run(() => data.deleteGoal(id), 'Цель удалена');
   };
 
   const handleDeleteContribution = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      goal_contributions: prev.goal_contributions.filter((c) => c.id !== id),
-    }));
-    showToast('Запись о взносе удалена');
+    void run(() => data.deleteContribution(id), 'Запись о взносе удалена');
   };
+
 
   // --- Recurring Handlers ---
   const handleConfirmRecurringPayment = (rec: RecurringPayment) => {
-    const isIncome = rec.type === 'income';
-    const newTxId = store.transactions.length > 0 ? Math.max(...store.transactions.map((t) => t.id)) + 1 : 1;
-    const tx: Transaction = {
-      id: newTxId,
-      type: isIncome ? 'income' : 'expense',
-      amount: rec.amount,
-      currency: rec.currency,
-      account_id: rec.account_id || store.accounts[0]?.id || 1,
-      category_id: rec.category_id || null,
-      user_id: selectedUserId !== 'all' ? selectedUserId : 1,
-      description: isIncome ? `Регулярный доход: ${rec.name}` : `Регулярный платёж: ${rec.name}`,
-      note: isIncome ? `Поступление за ${rec.next_due}` : `Оплата за ${rec.next_due}`,
-      occurred_at: new Date().toISOString(),
-      status: 'ok',
-      source: 'dashboard',
-      raw_text: null,
-      telegram_chat_id: null,
-      telegram_message_id: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    // 2. Shift next_due date by 1 month
-    const curDueDate = new Date(rec.next_due);
-    const nextDueDate = new Date(curDueDate.getFullYear(), curDueDate.getMonth() + 1, rec.day_of_month);
-    const updatedNextDue = nextDueDate.toISOString().slice(0, 10);
-
-    updateStore((prev) => ({
-      ...prev,
-      transactions: [tx, ...prev.transactions],
-      recurring_payments: prev.recurring_payments.map((r) =>
-        r.id === rec.id ? { ...r, next_due: updatedNextDue } : r
-      ),
-    }));
-
-    showToast(isIncome ? `Доход «${rec.name}» подтвержден и зачислен` : `Платёж «${rec.name}» подтверждён и сдвинут на следующий месяц`);
+    const userId = selectedUserId !== 'all' ? selectedUserId : 1;
+    void run(
+      () => data.confirmRecurringPayment(rec, userId),
+      rec.type === 'income'
+        ? `Доход «${rec.name}» подтвержден и зачислен`
+        : `Платёж «${rec.name}» подтверждён и сдвинут на следующий месяц`
+    );
   };
 
   const handleSaveRecurring = (recData: Partial<RecurringPayment>) => {
-    updateStore((prev) => {
-      if (recData.id) {
-        return {
-          ...prev,
-          recurring_payments: prev.recurring_payments.map((r) =>
-            r.id === recData.id ? ({ ...r, ...recData } as RecurringPayment) : r
-          ),
-        };
-      } else {
-        const newId = prev.recurring_payments.length > 0 ? Math.max(...prev.recurring_payments.map((r) => r.id)) + 1 : 1;
-        const newRec: RecurringPayment = {
-          id: newId,
-          name: recData.name || 'Платёж',
-          amount: recData.amount || 0,
-          currency: recData.currency || 'UAH',
-          account_id: recData.account_id ?? null,
-          category_id: recData.category_id ?? null,
-          day_of_month: recData.day_of_month || 15,
-          auto_confirm: recData.auto_confirm || false,
-          next_due: recData.next_due || new Date().toISOString().slice(0, 10),
-          is_active: true,
-          type: recData.type || 'expense',
-        };
-        return { ...prev, recurring_payments: [...prev.recurring_payments, newRec] };
-      }
-    });
-    showToast(recData.type === 'income' ? 'Регулярный доход сохранён' : 'Регулярный платёж сохранён');
+    void run(
+      () => data.saveRecurring(recData),
+      recData.type === 'income' ? 'Регулярный доход сохранён' : 'Регулярный платёж сохранён'
+    );
   };
 
   const handleDeleteRecurring = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      recurring_payments: prev.recurring_payments.filter((r) => r.id !== id),
-    }));
-    showToast('Регулярный платёж удалён');
+    void run(() => data.deleteRecurring(id), 'Регулярный платёж удалён');
   };
 
   // --- Accounts Handlers ---
   const handleSaveAccount = (accData: Partial<Account>) => {
-    updateStore((prev) => {
-      if (accData.id) {
-        return {
-          ...prev,
-          accounts: prev.accounts.map((a) => (a.id === accData.id ? ({ ...a, ...accData } as Account) : a)),
-        };
-      } else {
-        const newId = prev.accounts.length > 0 ? Math.max(...prev.accounts.map((a) => a.id)) + 1 : 1;
-        const newAcc: Account = {
-          id: newId,
-          name: accData.name || 'Новый счёт',
-          kind: accData.kind || 'card',
-          currency: accData.currency || 'UAH',
-          initial_balance: accData.initial_balance || 0,
-          is_active: true,
-          sort_order: prev.accounts.length + 1,
-        };
-        return { ...prev, accounts: [...prev.accounts, newAcc] };
-      }
-    });
-    showToast('Счёт сохранён');
+    void run(() => data.saveAccount(accData), 'Счёт сохранён');
   };
 
   const handleDeleteAccount = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      accounts: prev.accounts.filter((a) => a.id !== id),
-    }));
-    showToast('Счёт удалён');
+    void run(() => data.deleteAccount(id), 'Счёт удалён');
   };
 
   // --- Categories Handlers ---
   const handleSaveCategory = (catData: Partial<Category>) => {
-    updateStore((prev) => {
-      if (catData.id) {
-        return {
-          ...prev,
-          categories: prev.categories.map((c) => (c.id === catData.id ? ({ ...c, ...catData } as Category) : c)),
-        };
-      } else {
-        const newId = prev.categories.length > 0 ? Math.max(...prev.categories.map((c) => c.id)) + 1 : 1;
-        const newCat: Category = {
-          id: newId,
-          name: catData.name || 'Категория',
-          group_id: catData.group_id || 1,
-          type: catData.type || 'expense',
-          is_active: true,
-        };
-        return { ...prev, categories: [...prev.categories, newCat] };
-      }
-    });
-    showToast('Категория сохранена');
+    void run(() => data.saveCategory(catData), 'Категория сохранена');
   };
 
   const handleDeleteCategory = (id: number) => {
-    updateStore((prev) => ({
-      ...prev,
-      categories: prev.categories.filter((c) => c.id !== id),
-    }));
-    showToast('Категория удалена');
+    void run(() => data.deleteCategory(id), 'Категория удалена');
   };
 
   const handleSaveGroup = (grpData: Partial<CategoryGroup>) => {
-    updateStore((prev) => {
-      if (grpData.id) {
-        return {
-          ...prev,
-          category_groups: prev.category_groups.map((g) => (g.id === grpData.id ? ({ ...g, ...grpData } as CategoryGroup) : g)),
-        };
-      } else {
-        const newId = prev.category_groups.length > 0 ? Math.max(...prev.category_groups.map((g) => g.id)) + 1 : 1;
-        return {
-          ...prev,
-          category_groups: [...prev.category_groups, { id: newId, name: grpData.name || 'Группа', sort_order: prev.category_groups.length + 1 }],
-        };
-      }
-    });
+    void run(() => data.saveGroup(grpData), 'Группа сохранена');
   };
 
   // --- Settings Handlers ---
   const handleUpdateSettings = (newSettings: AppSettings) => {
-    updateStore((prev) => ({ ...prev, settings: newSettings }));
-    showToast('Настройки обновлены');
+    void run(() => data.saveSettings(newSettings), 'Настройки обновлены');
   };
+
 
   // Export functions (browser download trigger)
   const handleExportBackup = () => {
@@ -413,11 +281,12 @@ export default function App() {
 
   const handleImportBackup = (jsonContent: string) => {
     try {
-      const parsed = JSON.parse(jsonContent);
+      const parsed = JSON.parse(jsonContent) as AppStore;
       if (parsed.accounts && parsed.transactions && parsed.settings) {
-        setStore(parsed);
-        saveStore(parsed);
-        showToast('База данных успешно восстановлена из бэкапа');
+        void run(
+          () => data.importStore(parsed),
+          'База данных успешно восстановлена из бэкапа'
+        );
       } else {
         alert('Некорректная структура файла бэкапа.');
       }
@@ -427,26 +296,21 @@ export default function App() {
   };
 
   const handleClearTestData = () => {
-    const updated = clearTestDataOnly(store);
-    setStore(updated);
-    showToast('Тестовые транзакции очищены. Счета и настройки сохранены.');
+    void run(
+      () => data.clearTestData(),
+      'Тестовые транзакции очищены. Счета и настройки сохранены.'
+    );
   };
 
   const handleResetDefaults = () => {
-    const fresh = resetToDefaults();
-    setStore(fresh);
-    showToast('База сброшена к демо-данным');
+    void run(
+      () => data.resetToDefaults(),
+      'Операции удалены, настройки сброшены к значениям по умолчанию.'
+    );
   };
 
   const handleUpdateNextIncomeDate = (newDate: string) => {
-    updateStore((prev) => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        next_income_date: newDate,
-      },
-    }));
-    showToast('Дата следующего дохода обновлена');
+    void run(() => data.updateNextIncomeDate(newDate), 'Дата следующего дохода обновлена');
   };
 
   const needsReviewCount = store.transactions.filter((tx) => tx.status === 'needs_review').length;
@@ -454,19 +318,28 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Navigation */}
-      <Navbar
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        selectedUserId={selectedUserId}
-        setSelectedUserId={setSelectedUserId}
-        store={store}
-        onOpenQuickAdd={() => {
-          setEditingTx(null);
-          setIsTxModalOpen(true);
-        }}
-        onOpenQuickBot={() => setIsQuickBotModalOpen(true)}
-        needsReviewCount={needsReviewCount}
-      />
+      <div className="relative">
+        <Navbar
+          currentTab={currentTab}
+          setCurrentTab={setCurrentTab}
+          selectedUserId={selectedUserId}
+          setSelectedUserId={setSelectedUserId}
+          store={store}
+          onOpenQuickAdd={() => {
+            setEditingTx(null);
+            setIsTxModalOpen(true);
+          }}
+          onOpenQuickBot={() => setIsQuickBotModalOpen(true)}
+          needsReviewCount={needsReviewCount}
+        />
+        <button
+          onClick={() => void signOut()}
+          title="Выйти из аккаунта"
+          className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
+      </div>
 
       {/* Main Viewport Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">

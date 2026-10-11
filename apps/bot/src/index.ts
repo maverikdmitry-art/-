@@ -1,15 +1,14 @@
-import { Bot, Context, GrammyError } from 'grammy';
-import { loadConfig } from './config';
+import { Bot, GrammyError } from 'grammy';
+import { config } from './config';
+import { handleBalance, handleHelp, handleStart } from './handlers';
 
 /**
- * Точка входа Telegram-бота OoverrFinancee (ROADMAP 1.7).
+ * Точка входа Telegram-бота OoverrFinancee (ROADMAP 1.7–1.9).
  *
- * Пока — минимальный каркас: загрузка и валидация .env, запуск бота,
- * проверка доступа по белому списку ID и команда /start.
- * Основной сценарий ввода трат (/balance, /stats, Gemini-парсер) — следующие шаги.
+ * Загрузка и валидация .env, запуск бота, проверка доступа по белому списку ID,
+ * команды /start, /help, /balance. Ввод трат и /stats — следующие шаги.
  */
 
-const config = loadConfig();
 const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
 
 // Белый список: чей ID разрешён пользоваться ботом. Остальных молча игнорируем.
@@ -27,13 +26,9 @@ bot.use(async (ctx, next) => {
   }
 });
 
-bot.command('start', async (ctx: Context) => {
-  await ctx.reply(
-    'Привет! Я финансовый трекер OoverrFinancee.\n\n' +
-      'Пока умею немного — это только начало. Скоро здесь будут быстрый ввод трат, ' +
-      'балансы и статистика.'
-  );
-});
+bot.command('start', handleStart);
+bot.command('help', handleHelp);
+bot.command('balance', handleBalance);
 
 // Ловим любые ошибки обработчиков, чтобы один сбой не ронял бота.
 bot.catch((err) => {
@@ -47,6 +42,12 @@ bot.catch((err) => {
 
 console.log('Бот OoverrFinancee запускается…');
 console.log(`Разрешённые Telegram ID: ${config.ALLOWED_TELEGRAM_IDS.join(', ')}`);
+if (!config.SUPABASE_URL || !config.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn(
+    '[config] Supabase не настроен (нет SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY в .env). ' +
+      'Команда /balance будет сообщать об отсутствии подключения.'
+  );
+}
 
 bot.start({
   onStart: (info) => {

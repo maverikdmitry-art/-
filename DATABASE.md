@@ -254,20 +254,30 @@ balance(account) =
 В `supabase/schema.sql` уже создано представление `account_balances` (`security_invoker = on`, чтобы работал RLS), чтобы читать баланс одним запросом:
 
 ```sql
-create or replace view account_balances
-with (security_invoker = on) as
-select a.id as account_id, a.currency,
-       coalesce(sum(
-         case t.type
-           when 'income'     then  t.amount
-           when 'expense'    then -t.amount
-           when 'adjustment' then  t.amount   -- со знаком
-           else 0
-         end
-       ), 0) + a.initial_balance as balance
-from accounts a
-left join transactions t on t.account_id = a.id
-group by a.id, a.currency, a.initial_balance;
+create or replace view account_balances as
+select
+  a.id       as account_id,
+  a.name     as account_name,
+  a.currency as currency,
+  a.initial_balance
+    + coalesce((
+        select sum(
+          case
+            when t.type = 'income'     then t.amount
+            when t.type = 'expense'    then -t.amount
+            when t.type = 'adjustment' then t.amount
+            else 0
+          end
+        )
+        from transactions t
+        where t.account_id = a.id
+      ), 0)
+    + coalesce((select sum(tr.amount_to)   from transfers tr where tr.to_account_id   = a.id), 0)
+    - coalesce((select sum(tr.amount_from) from transfers tr where tr.from_account_id = a.id), 0)
+  as balance
+from accounts a;
+
+alter view account_balances set (security_invoker = true);
 ```
 
 Поле `updated_at` в `transactions` автоматически обновляет триггер `trg_transactions_updated` (функция `set_updated_at`).

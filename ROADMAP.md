@@ -26,7 +26,7 @@
 | [x] 0.1 | Установить Node.js 20+ и VS Code. Проверить, что проект использует npm workspaces: корневой `package.json` указывает на `packages/*` и `apps/*`. | В терминале `node --version` показывает 20+. Зависимости установлены через `npm install` на корне. |
 | [x] 0.2 | Создать бота в Telegram через @BotFather, получить токен. Узнать свой Telegram ID и ID Даши (бот @userinfobot). | Токен и два ID записаны. |
 | [x] 0.3 | Создать **отдельный тестовый** проект в Supabase. Взять URL, anon-ключ и service_role-ключ. | Проект открывается, SQL Editor доступен. |
-| [x] 0.4 | Создать ключ Google Gemini API (кли `aistudio.google.com/apikey`) для LLM-парсера и распознавания голоса. | Ключ записан в `.env`. |
+| [x] 0.4 | Создать ключ Google Gemini API (https://aistudio.google.com/apikey) для LLM-парсера и распознавания голоса. | Ключ записан в `.env`. |
 | [x] 0.5 | Создать структуру папок из ARCHITECTURE.md, файл `.env` по шаблону `.env.example`. Структура: `apps/web` (React-дашборд), `apps/bot` (GrammY-бот), `packages/shared` (общий код), `supabase/schema.sql`. | Структура есть, `.env` заполнен и закреплён в `.gitignore`. |
 
 ---

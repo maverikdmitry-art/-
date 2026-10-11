@@ -35,6 +35,17 @@
 
 ## 2. Технологический стек
 
+- **Язык:** TypeScript (strict), Node.js 20+.
+- **Сборка монорепозитория:** npm workspaces (`packages/*`, `apps/*`).
+- **Дашборд:** React 19 + Vite 8 + Tailwind CSS 4 (`@tailwindcss/vite`), иконки `lucide-react`, анимации `motion`.
+- **БД:** Supabase (PostgreSQL + Auth + Realtime + RLS), клиент `@supabase/supabase-js`.
+- **Бот:** GrammY (`@grammyjs/*`) — планируется в `apps/bot`.
+- **LLM / STT:** Google Gemini через `@google/genai` (LLM-парсер и распознавание голоса). Один ключ на всё.
+- **Деньги:** `decimal.js` (никакого `float`), в БД `numeric(14,2)`.
+- **Время:** хранение в UTC (`timestamptz`), но «сутки/неделя/месяц» считаются по **Europe/Kyiv** через `date-fns` + `date-fns-tz`.
+- **Валидация ответов LLM:** `zod` (проверка JSON от Gemini перед использованием).
+- **Конфиги:** корневой `.env` для секретов (шаблон — `.env.example`); несекретные настройки — в таблице `settings`.
+
 ---
 
 ## 3. Структура монорепозитория
@@ -134,7 +145,7 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
 
 ## 5. Веб-дашборд (`apps/web`)
 
-- **Точка входа:** `src/main.tsx` → `App.tsx`. Состояние хранится в `AppStore` (`useState`) и синхронизируется в `localStorage` через `services/storage.ts`.
+- **Точка входа:** `src/main.tsx` → `App.tsx`. Состояние — объект `AppStore` (`useState`), который **перечитывается из Supabase** после каждого изменения. Единый источник правды — БД (RLS, только для авторизованных).
 
 ---
 
@@ -240,8 +251,8 @@ LOG_LEVEL=info
 
 ## 12. Что готово и что в плане (соответствие ROADMAP)
 
-- ✅ **Готово:** дашборд (`apps/web`) на React/Vite; общий пакет (`packages/shared`): типы, деньги, время, формулы, regex-парсер, Gemini-парсер/транскрипция, Supabase-клиенты/мапперы; схема БД (`schema.sql`). Практически все фичи v2 и v4 по дашборду.
-- ⏳ **В плане:** написать Telegram-бота на GrammY (`apps/bot`, ROADMAP 1.7–1.9); уведомления и `/backup` (3.1–3.3); **подключить дашборд к Supabase** (сейчас он на `localStorage`); деплой бота и дашборда (3.5–3.6); архивация старых данных (v4.13).
+- ✅ **Готово:** дашборд (`apps/web`) на React/Vite; общий пакет (`packages/shared`): типы, деньги, время, формулы, regex-парсер, Gemini-парсер/транскрипция, Supabase-клиенты/мапперы; схема БД (`schema.sql`); Telegram-бот (`apps/bot`, `/start`, `/help`, `/balance`). Практически все фичи v2 и v4 по дашборду.
+- ⏳ **В плане:** основной сценарий ввода трат в боте (`apps/bot`); уведомления партнёру и `/backup` (3.1–3.3); Realtime-подписку дашборда (сейчас перечитывает store после каждой мутации); деплой бота и дашборда (3.5–3.6); архивация старых данных (v4.13).
 
 Актуальный статус каждого шага — в [`ROADMAP.md`](./ROADMAP.md).
 
@@ -250,7 +261,7 @@ LOG_LEVEL=info
 - **Модалки (`components/`):** добавление/редактирование транзакции, перевод, ревизия счёта, взнос в цель, быстрый ввод через парсер.
 - **Уведомления:** всплывающий «тост» (например, уведомление партнёру) в `App.tsx`.
 - **Секреты:** `vite.config.ts` читает корневой `.env` и пробрасывает в бандл **только** `SUPABASE_URL` и `SUPABASE_ANON_KEY`. `SUPABASE_SERVICE_ROLE_KEY` и `GEMINI_API_KEY` в браузер не попадают никогда.
-- **Хранилище данных:** ⚠️ сейчас — `localStorage` (ключ `ooverfinancee_store_v1`) с демо-сидом. Подключение к Supabase (anon-ключ + Realtime) — следующий шаг, слой для этого в `shared` уже готов.
+- **Хранилище данных:** **Supabase — единственный источник правды.** Дашборд читает/пишет таблицы через `services/data.ts` (anon-ключ + RLS), авторизация — Supabase Auth (email/пароль, экран входа `components/AuthGate.tsx`). `localStorage` больше не используется для данных; экспорт CSV/JSON остался в `services/storage.ts` только для скачивания файлов.
 
 
 - `apps/web` и `apps/bot` **никогда** не импортируют друг друга — общий код только через `@oover/shared`.
@@ -258,15 +269,3 @@ LOG_LEVEL=info
 - **Деньги — только через `shared/money.ts`** (decimal.js). **Время/границы суток — только через `shared/time.ts`.**
 - **SQL и работа с БД — только через `shared/supabase/*`** (клиенты и мапперы). Таблицы и политики — в `supabase/schema.sql`.
 - `packages/shared` не знает ни про React, ни про Telegram — это чистый TypeScript.
-
-
-- **Язык:** TypeScript (strict), Node.js 20+.
-- **Сборка монорепозитория:** npm workspaces (`packages/*`, `apps/*`).
-- **Дашборд:** React 19 + Vite 8 + Tailwind CSS 4 (`@tailwindcss/vite`), иконки `lucide-react`, анимации `motion`.
-- **БД:** Supabase (PostgreSQL + Auth + Realtime + RLS), клиент `@supabase/supabase-js`.
-- **Бот:** GrammY (`@grammyjs/*`) — планируется в `apps/bot`.
-- **LLM / STT:** Google Gemini через `@google/genai` (LLM-парсер и распознавание голоса). Один ключ на всё.
-- **Деньги:** `decimal.js` (никакого `float`), в БД `numeric(14,2)`.
-- **Время:** хранение в UTC (`timestamptz`), но «сутки/неделя/месяц» считаются по **Europe/Kyiv** через `date-fns` + `date-fns-tz`.
-- **Валидация ответов LLM:** `zod` (проверка JSON от Gemini перед использованием).
-- **Конфиги:** корневой `.env` для секретов (шаблон — `.env.example`); несекретные настройки — в таблице `settings`.

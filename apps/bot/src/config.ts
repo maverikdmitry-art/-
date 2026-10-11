@@ -39,6 +39,11 @@ const envSchema = z.object({
     ),
   LOG_LEVEL: z.string().default('info'),
   TZ: z.string().default('Europe/Kyiv'),
+  // Supabase — опционально. Бот должен запускаться и без БД (тогда /balance подскажет,
+  // что подключение не настроено). Фоллбэки: VITE_SUPABASE_URL (общий .env с дашборда)
+  // или SUPABASE_URL; для бота приоритетно service_role, иначе anon.
+  SUPABASE_URL: z.string().min(1).optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
 });
 
 export type BotConfig = z.infer<typeof envSchema>;
@@ -48,7 +53,15 @@ export type BotConfig = z.infer<typeof envSchema>;
  * с понятным текстом — бот не должен молча запускаться с неверной конфигурацией.
  */
 export function loadConfig(): BotConfig {
-  const result = envSchema.safeParse(process.env);
+  const result = envSchema.safeParse({
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    ALLOWED_TELEGRAM_IDS: process.env.ALLOWED_TELEGRAM_IDS,
+    LOG_LEVEL: process.env.LOG_LEVEL,
+    TZ: process.env.TZ,
+    SUPABASE_URL: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY:
+      process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY,
+  });
   if (!result.success) {
     const details = result.error.issues
       .map((issue) => `  • ${issue.path.join('.') || '(корень)'}: ${issue.message}`)
@@ -57,3 +70,9 @@ export function loadConfig(): BotConfig {
   }
   return result.data;
 }
+
+/**
+ * Готовая конфигурация, загруженная из корневого .env при импорте модуля.
+ * Используется модулями доступа к БД и хендлерами.
+ */
+export const config = loadConfig();

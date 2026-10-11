@@ -1,0 +1,6 @@
+{
+  "name": "OoverFinancee",
+  "description": "Персональный и семейный финансовый трекер с расчетными балансами счетов, формулой Safe-to-spend, ревизией счетов, целями накопления, регулярными платежами и Telegram-интеграцией.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

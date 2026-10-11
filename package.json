@@ -1,0 +1,25 @@
+{
+  "name": "ooverr-financee",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OoverrFinancee — семейный финансовый трекер (React-дашборд + Telegram-бот + Supabase).",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev:web": "npm run dev --workspace @oover/web",
+    "dev:bot": "npm run dev --workspace @oover/bot",
+    "build:web": "npm run build --workspace @oover/web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

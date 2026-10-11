@@ -1,0 +1,21 @@
+{
+  "name": "@oover/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Общий код OoverrFinancee: типы, деньги, время (Europe/Kyiv), формулы, парсеры, клиент Supabase.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^2.28.0",
+    "@supabase/supabase-js": "^2.117.3",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
+    "decimal.js": "^10.6.0",
+    "zod": "^4.6.5"
+  }
+}

@@ -12,7 +12,8 @@ import { z } from 'zod';
  * (`npm run dev:bot` из корня или `tsx src/index.ts` из apps/bot).
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '../..');
+// config.ts лежит в apps/bot/src → поднимаемся на 3 уровня до корня монорепозитория.
+const repoRoot = path.resolve(__dirname, '../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
 
 /** Строка ID через запятую ("123,456") → массив чисел. */
@@ -26,11 +27,11 @@ function parseTelegramIds(raw: string): number[] {
 
 const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z
-    .string({ required_error: 'TELEGRAM_BOT_TOKEN не задан в .env' })
+    .string({ error: 'TELEGRAM_BOT_TOKEN не задан в .env' })
     .min(1, 'TELEGRAM_BOT_TOKEN не может быть пустым'),
   ALLOWED_TELEGRAM_IDS: z
-    .string({ required_error: 'ALLOWED_TELEGRAM_IDS не задан в .env' })
-    .transform(parseTelegramIds, { message: 'ALLOWED_TELEGRAM_IDS должен быть списком чисел' })
+    .string({ error: 'ALLOWED_TELEGRAM_IDS не задан в .env' })
+    .transform(parseTelegramIds)
     .pipe(
       z
         .array(z.number().int().positive())

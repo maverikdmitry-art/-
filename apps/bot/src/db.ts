@@ -1,10 +1,12 @@
 import {
   createServerClient,
   mapAccount,
+  mapCategory,
   mapSettings,
+  mapUser,
   type SupabaseClientAny,
 } from '@oover/shared';
-import type { Account, AppSettings } from '@oover/shared';
+import type { Account, AppSettings, Category, NewTransaction, User } from '@oover/shared';
 import { config } from './config';
 
 /**
@@ -49,6 +51,72 @@ export async function fetchSettings(supabase: SupabaseClientAny): Promise<AppSet
   const { data, error } = await supabase.from('settings').select('key, value');
   if (error) throw new Error(`Не удалось загрузить настройки: ${error.message}`);
   return mapSettings((data ?? []) as Array<{ key: string; value: string }>);
+}
+
+/** Все категории (нужны парсеру для сопоставления «кофе» → Кафе). */
+export async function fetchCategories(supabase: SupabaseClientAny): Promise<Category[]> {
+  const { data, error } = await supabase.from('categories').select('*').order('id');
+  if (error) throw new Error(`Не удалось загрузить категории: ${error.message}`);
+  return (data ?? []).map((row) => mapCategory(row as Record<string, unknown>));
+}
+
+/** Пользователь по telegram_id. null — если не привязан (см. seed в schema.sql). */
+export async function fetchUserByTelegramId(
+  supabase: SupabaseClientAny,
+  telegramId: number
+): Promise<User | null> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('telegram_id', telegramId)
+    .maybeSingle();
+  if (error) throw new Error(`Не удалось найти пользователя: ${error.message}`);
+  return data ? mapUser(data as Record<string, unknown>) : null;
+}
+
+/**
+ * Последний использованный счёт пользователя — чтобы парсер предлагал тот же счёт
+ * по умолчанию («кофе 150» → последний карточный счёт).
+ */
+export async function fetchLastUsedAccountId(
+  supabase: SupabaseClientAny,
+  userId: number
+): Promise<number | undefined> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('account_id')
+    .eq('user_id', userId)
+    .order('occurred_at', { ascending: false })
+    .limit(1);
+  if (error || !data || data.length === 0) return undefined;
+  return Number((data[0] as Record<string, unknown>).account_id);
+}
+
+/**
+ * Идемпотентная вставка транзакции. Одно и то же сообщение Telegram
+ * (telegram_message_id) не создаст дубль — при повторе insert вернёт 0 строк.
+ * Возвращает id созданной транзакции либо null, если это был дубль.
+ */
+export async function insertTransaction(
+  supabase: SupabaseClientAny,
+  tx: NewTransaction,
+  telegramMessageId: number
+): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert({
+      ...tx,
+      telegram_message_id: telegramMessageId,
+      source: 'bot',
+    })
+    .select('id')
+    .maybeSingle();
+  if (error) {
+    // 23505 = unique_violation (uq_tx_telegram) → это повтор того же сообщения.
+    if (error.code === '23505') return null;
+    throw new Error(`Не удалось сохранить операцию: ${error.message}`);
+  }
+  return data ? Number((data as Record<string, unknown>).id) : null;
 }
 
 export type AccountBalance = {

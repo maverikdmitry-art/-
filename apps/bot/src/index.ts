@@ -1,12 +1,13 @@
 import { Bot, GrammyError } from 'grammy';
 import { config } from './config';
 import { handleBalance, handleHelp, handleStart } from './handlers';
+import { handleCancel, handleEdit, handleSave, handleText } from './input';
 
 /**
- * Точка входа Telegram-бота OoverrFinancee (ROADMAP 1.7–1.9).
+ * Точка входа Telegram-бота OoverrFinancee (ROADMAP 1.7–1.8).
  *
  * Загрузка и валидация .env, запуск бота, проверка доступа по белому списку ID,
- * команды /start, /help, /balance. Ввод трат и /stats — следующие шаги.
+ * команды /start, /help, /balance и ввод трат текстом («кофе 150») с превью и кнопками.
  */
 
 const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
@@ -30,6 +31,14 @@ bot.command('start', handleStart);
 bot.command('help', handleHelp);
 bot.command('balance', handleBalance);
 
+// Ввод трат: любой текст (кроме команд) → разбор → превью с кнопками.
+bot.on('message:text', handleText);
+
+// Кнопки подтверждения/отмены под превью операции.
+bot.callbackQuery('tx:save', handleSave);
+bot.callbackQuery('tx:edit', handleEdit);
+bot.callbackQuery('tx:cancel', handleCancel);
+
 // Ловим любые ошибки обработчиков, чтобы один сбой не ронял бота.
 bot.catch((err) => {
   const e = err.error;
@@ -45,8 +54,11 @@ console.log(`Разрешённые Telegram ID: ${config.ALLOWED_TELEGRAM_IDS.j
 if (!config.SUPABASE_URL || !config.SUPABASE_SERVICE_ROLE_KEY) {
   console.warn(
     '[config] Supabase не настроен (нет SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY в .env). ' +
-      'Команда /balance будет сообщать об отсутствии подключения.'
+      'Команда /balance и ввод трат будут сообщать об отсутствии подключения.'
   );
+}
+if (!config.GEMINI_API_KEY) {
+  console.warn('[config] GEMINI_API_KEY не задан — разбор трат работает на regex-фоллбэке.');
 }
 
 bot.start({

@@ -44,6 +44,10 @@ const envSchema = z.object({
   // или SUPABASE_URL; для бота приоритетно service_role, иначе anon.
   SUPABASE_URL: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  // Gemini — опционально. Если ключ задан, парсер использует LLM (умный разбор),
+  // иначе работает regex-фоллбэк (простой разбор по ключевым словам).
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
 });
 
 export type BotConfig = z.infer<typeof envSchema>;
@@ -61,6 +65,8 @@ export function loadConfig(): BotConfig {
     SUPABASE_URL: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY:
       process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    GEMINI_MODEL: process.env.GEMINI_MODEL,
   });
   if (!result.success) {
     const details = result.error.issues

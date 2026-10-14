@@ -165,10 +165,11 @@ create table if not exists processed_updates (
 `supabase/schema.sql` содержит готовый seed. Все вставки — с `on conflict ... do nothing`, поэтому файл можно переприменять. Для устойчивости `on conflict` по именам заранее созданы уникальные индексы `uq_group_name` (на `category_groups.name`) и `uq_account_name` (на `accounts.name`).
 
 ```sql
--- Пользователи: ЗАМЕНИ telegram_id на реальные (узнать у @userinfobot)
+-- Пользователи: telegram_id заменить на реальные (узнать у @userinfobot)
+-- Значения должны совпадать с ALLOWED_TELEGRAM_IDS из .env.
 insert into users (name, telegram_id, notify_partner) values
-  ('Дмитро', 111111111, true),
-  ('Даша',    222222222, true)
+  ('Дмитро', 396881223, true),
+  ('Даша',    725733059, true)
 on conflict (telegram_id) do nothing;
 
 insert into category_groups (name, sort_order) values

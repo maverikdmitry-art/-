@@ -190,10 +190,11 @@ create trigger trg_transactions_updated
 create unique index if not exists uq_group_name   on category_groups (name);
 create unique index if not exists uq_account_name on accounts (name);
 
--- Пользователи: ЗАМЕНИ telegram_id на реальные (узнать можно у @userinfobot).
+-- Пользователи: telegram_id заменить на реальные (узнать можно у @userinfobot).
+-- Значения ниже должны совпадать с ALLOWED_TELEGRAM_IDS из .env (иначе бот не найдёт автора).
 insert into users (name, telegram_id, notify_partner) values
-  ('Дмитро', 111111111, true),
-  ('Даша',    222222222, true)
+  ('Дмитро', 396881223, true),
+  ('Даша',    725733059, true)
 on conflict (telegram_id) do nothing;
 
 insert into category_groups (name, sort_order) values

@@ -185,7 +185,9 @@ export async function handleEdit(ctx: Context): Promise<void> {
   );
 }
 
-/** Человекочитаемое превью разобранной операции. */
+export function cancelPending(telegramId: number): boolean {
+  return pending.delete(telegramId);
+}
 function formatPreview(
   result: ParseResult,
   accounts: Account[],

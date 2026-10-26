@@ -174,7 +174,38 @@ async function fetchAccountBalances(
   });
 }
 
-/** Сумма балансов активных счетов, переведённая в UAH. Деньги — через функции shared. */
+
+import { cancelPending } from './input';
+
+/** /income — подсказка по вводу дохода. */
+export async function handleIncome(ctx: Context): Promise<void> {
+  await ctx.reply(
+    'Внеси поступление. Напиши, например:\n' +
+      '• «зп 20000»\n' +
+      '• «фриланс 5000»\n' +
+      '• «возврат 300»'
+  );
+}
+
+/** /expense — подсказка по вводу траты. */
+export async function handleExpense(ctx: Context): Promise<void> {
+  await ctx.reply(
+    'Внеси трату. Напиши, например:\n' +
+      '• «кофе 150»\n' +
+      '• «такси 340 болт»\n' +
+      '• «15$ такси»'
+  );
+}
+
+/** /cancel — отменить текущий ввод/ожидающую операцию. */
+export async function handleCancelCommand(ctx: Context): Promise<void> {
+  const telegramId = ctx.from?.id;
+  if (telegramId !== undefined && cancelPending(telegramId)) {
+    await ctx.reply('✖️ Отменено, ничего не сохранено.');
+  } else {
+    await ctx.reply('Нет ожидающей операции для отмены.');
+  }
+}
 function calcNetWorth(rows: BalanceRow[], accounts: Account[], usdRate: number): number {
   const activeIds = new Set(accounts.filter((a) => a.is_active).map((a) => a.id));
   const uahAmounts = rows

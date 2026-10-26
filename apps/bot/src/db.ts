@@ -2,11 +2,15 @@ import {
   createServerClient,
   mapAccount,
   mapCategory,
+  mapGoalContribution,
+  mapRecurringPayment,
   mapSettings,
+  mapTransaction,
+  mapTransfer,
   mapUser,
   type SupabaseClientAny,
 } from '@oover/shared';
-import type { Account, AppSettings, Category, NewTransaction, User } from '@oover/shared';
+import type { Account, AppSettings, Category, GoalContribution, NewTransaction, RecurringPayment, Transaction, Transfer, User } from '@oover/shared';
 import { config } from './config';
 
 /**
@@ -67,6 +71,9 @@ export async function fetchUserByTelegramId(
 ): Promise<User | null> {
   const { data, error } = await supabase
     .from('users')
+
+
+
     .select('*')
     .eq('telegram_id', telegramId)
     .maybeSingle();
@@ -116,12 +123,36 @@ export async function insertTransaction(
     if (error.code === '23505') return null;
     throw new Error(`Не удалось сохранить операцию: ${error.message}`);
   }
-  return data ? Number((data as Record<string, unknown>).id) : null;
+  const first = Array.isArray(data) ? (data[0] as Record<string, unknown>) : (data as Record<string, unknown>);
+
+  if (!first || first.id === undefined || first.id === null) {
+    console.error('[db.insertTransaction] insert returned no id:', data);
+    return null;
+  }
+  return Number(first.id);
 }
 
-export type AccountBalance = {
-  account: Account;
-  /** Баланс в валюте счёта (с точностью до копеек). */
-  balance: number;
-};
+export async function fetchTransfers(supabase: SupabaseClientAny): Promise<Transfer[]> {
+  const { data, error } = await supabase.from('transfers').select('*').order('occurred_at', { ascending: false });
+  if (error) throw new Error(`Не удалось загрузить переводы: ${error.message}`);
+  return (data ?? []).map((row) => mapTransfer(row as Record<string, unknown>));
+}
+
+export async function fetchGoalContributions(supabase: SupabaseClientAny): Promise<GoalContribution[]> {
+  const { data, error } = await supabase.from('goal_contributions').select('*').order('created_at', { ascending: false });
+  if (error) throw new Error(`Не удалось загрузить взносы: ${error.message}`);
+  return (data ?? []).map((row) => mapGoalContribution(row as Record<string, unknown>));
+}
+
+export async function fetchRecurring(supabase: SupabaseClientAny): Promise<RecurringPayment[]> {
+  const { data, error } = await supabase.from('recurring_payments').select('*').order('id');
+  if (error) throw new Error(`Не удалось загрузить регулярные платежи: ${error.message}`);
+  return (data ?? []).map((row) => mapRecurringPayment(row as Record<string, unknown>));
+}
+
+export async function fetchTransactions(supabase: SupabaseClientAny): Promise<Transaction[]> {
+  const { data, error } = await supabase.from('transactions').select('*').order('occurred_at', { ascending: false });
+  if (error) throw new Error(`Не удалось загрузить операции: ${error.message}`);
+  return (data ?? []).map((row) => mapTransaction(row as Record<string, unknown>));
+}
 

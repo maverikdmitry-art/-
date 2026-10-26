@@ -87,7 +87,7 @@ function transactionToRow(tx: Partial<Transaction>): Row {
     note: tx.note ?? null,
     occurred_at: tx.occurred_at,
     status: tx.status,
-    source: tx.source,
+    source: tx.source ?? 'dashboard',
     raw_text: tx.raw_text ?? null,
     telegram_chat_id: tx.telegram_chat_id ?? null,
     telegram_message_id: tx.telegram_message_id ?? null,
@@ -101,10 +101,17 @@ export async function saveTransaction(tx: Partial<Transaction>): Promise<void> {
   const row = transactionToRow(tx);
   if (tx.id) {
     const { error } = await supabase.from('transactions').update(row).eq('id', tx.id);
-    if (error) throw new Error(error.message);
+    if (error) {
+      console.error('[data.saveTransaction] update failed:', error.message, error);
+      throw new Error(error.message);
+    }
   } else {
-    const { error } = await supabase.from('transactions').insert(row);
-    if (error) throw new Error(error.message);
+    const { data, error } = await supabase.from('transactions').insert(row).select('id');
+    if (error) {
+      console.error('[data.saveTransaction] insert failed:', error.message, error);
+      throw new Error(error.message);
+    }
+    console.info('[data.saveTransaction] inserted:', data);
   }
 }
 

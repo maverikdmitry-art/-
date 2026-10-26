@@ -66,22 +66,45 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('[TransactionModal] handleSubmit', { amount, accountId, userId, accounts: accounts.length });
     const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount === 0) return;
+    if (isNaN(numAmount) || numAmount === 0) {
+      console.warn('[TransactionModal] blocked: invalid amount');
+      return;
+    }
+
+    // Убедимся, что счёт существует (иначе FK-нарушение на account_id)
+    const validAccountId =
+      accounts.find((a) => a.id === accountId)?.id ??
+      accounts.find((a) => a.is_active)?.id ??
+      accounts[0]?.id;
+    if (!validAccountId) {
+      console.error('[TransactionModal] no accounts available');
+      return;
+    }
 
     const finalAmount = type === 'adjustment' ? numAmount : Math.abs(numAmount);
+
+    let occurredIso: string;
+    try {
+      const d = new Date(occurredAt);
+      if (isNaN(d.getTime())) throw new Error('invalid date');
+      occurredIso = d.toISOString();
+    } catch {
+      occurredIso = new Date().toISOString();
+    }
 
     onSave({
       ...(initialData?.id ? { id: initialData.id } : {}),
       type,
       amount: finalAmount,
       currency,
-      account_id: accountId,
+      account_id: validAccountId,
       category_id: categoryId || null,
       user_id: userId,
       description: description.trim() || (type === 'income' ? 'Доход' : type === 'adjustment' ? 'Корректировка' : 'Расход'),
       note: note.trim(),
-      occurred_at: new Date(occurredAt).toISOString(),
+      occurred_at: occurredIso,
       status,
       source: initialData?.source || 'dashboard',
     });

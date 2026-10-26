@@ -206,7 +206,7 @@ export default function App() {
 
   // --- Recurring Handlers ---
   const handleConfirmRecurringPayment = (rec: RecurringPayment) => {
-    const userId = selectedUserId !== 'all' ? selectedUserId : 1;
+    const userId = selectedUserId !== 'all' ? selectedUserId : (store.users[0]?.id ?? 1);
     void run(
       () => data.confirmRecurringPayment(rec, userId),
       rec.type === 'income'
@@ -513,7 +513,7 @@ export default function App() {
         accounts={store.accounts}
         categories={store.categories}
         users={store.users}
-        defaultUserId={selectedUserId !== 'all' ? selectedUserId : 1}
+        defaultUserId={selectedUserId !== 'all' ? selectedUserId : (store.users[0]?.id ?? 1)}
       />
 
       <TransferModal
@@ -523,7 +523,7 @@ export default function App() {
         accounts={store.accounts}
         users={store.users}
         usdRate={store.settings.usd_rate}
-        defaultUserId={selectedUserId !== 'all' ? selectedUserId : 1}
+        defaultUserId={selectedUserId !== 'all' ? selectedUserId : (store.users[0]?.id ?? 1)}
       />
 
       {revisionAccount && (
@@ -533,7 +533,7 @@ export default function App() {
           account={revisionAccount}
           currentBalance={calculateAccountBalance(revisionAccount, store.transactions, store.transfers)}
           users={store.users}
-          defaultUserId={selectedUserId !== 'all' ? selectedUserId : 1}
+          defaultUserId={selectedUserId !== 'all' ? selectedUserId : (store.users[0]?.id ?? 1)}
           onSaveAdjustment={handleSaveAdjustment}
         />
       )}
@@ -547,7 +547,7 @@ export default function App() {
             .filter((c) => c.goal_id === goalDepositGoal.id)
             .reduce((sum, c) => sum + (c.amount || 0), 0)}
           users={store.users}
-          defaultUserId={selectedUserId !== 'all' ? selectedUserId : 1}
+          defaultUserId={selectedUserId !== 'all' ? selectedUserId : (store.users[0]?.id ?? 1)}
           onSave={handleSaveGoalContribution}
         />
       )}
@@ -558,7 +558,7 @@ export default function App() {
         accounts={store.accounts}
         categories={store.categories}
         users={store.users}
-        defaultUserId={selectedUserId !== 'all' ? selectedUserId : 1}
+        defaultUserId={selectedUserId !== 'all' ? selectedUserId : (store.users[0]?.id ?? 1)}
         lastUsedAccountId={store.transactions[0]?.account_id}
         onSaveTransaction={handleSaveTransaction}
         onPartnerNotification={(txt) => showToast(txt)}

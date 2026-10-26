@@ -32,7 +32,13 @@
 
 ## Активные баги
 
-_Пока пусто._
+### Кнопки «Быстрая операция» и «операция» не сохраняют данные в Supabase
+
+* **Где:** `apps/web/src/components/Navbar.tsx` (кнопки `onOpenQuickBot` / `onOpenQuickAdd`), `apps/web/src/components/QuickBotInputModal.tsx` (`handleConfirmSave`), `apps/web/src/components/TransactionModal.tsx` (`handleSubmit`), `apps/web/src/App.tsx` (`handleSaveTransaction` → `data.saveTransaction`), `apps/web/src/services/data.ts` (`saveTransaction`).
+* **Что ожидали:** нажатие «Сохранить» в модалке создаёт/обновляет строку в таблице `transactions` Supabase, store перечитывается, показывается тост «Операция успешно сохранена».
+* **Что произошло:** запрос не доходит / отклоняется Supabase; запись не появляется, баланс не пересчитывается. Возможные причины: env не проброшен в браузер (пустой `SUPABASE_URL`), RLS-отказ (сессия не авторизована), `Invalid Date` в `TransactionModal` (бросает до вызова `onSave`), несовпадение полей `Transaction` с DDL.
+* **Шаги для воспроизведения:** запустить `npm run dev:web`, войти, нажать «Быстрая операция» → ввести «кофе 150» → «Сохранить ✅» (или «операция» → заполнить форму → «Сохранить»). Открыть DevTools → Network/Console — запрос к Supabase отсутствует или возвращает ошибку.
+* **Статус:** 🟢 Починен
 
 ---
 

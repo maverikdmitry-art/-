@@ -1,6 +1,6 @@
 import { Bot, GrammyError } from 'grammy';
 import { config } from './config';
-import { handleBalance, handleHelp, handleStart } from './handlers';
+import { handleBalance, handleHelp, handleStart, handleStats, handleToday } from './handlers';
 import { handleCancel, handleEdit, handleSave, handleText } from './input';
 
 /**
@@ -30,6 +30,8 @@ bot.use(async (ctx, next) => {
 bot.command('start', handleStart);
 bot.command('help', handleHelp);
 bot.command('balance', handleBalance);
+bot.command('today', handleToday);
+bot.command('stats', handleStats);
 
 // Ввод трат: любой текст (кроме команд) → разбор → превью с кнопками.
 bot.on('message:text', handleText);

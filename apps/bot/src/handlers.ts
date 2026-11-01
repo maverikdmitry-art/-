@@ -1,7 +1,8 @@
 import type { Context } from 'grammy';
+import { InputFile } from 'grammy';
 import { calculateMonthComparison, calculateSafeToSpend, convertToUah, formatMoney, round2, sumMoney } from '@oover/shared';
 import type { Account, SupabaseClientAny } from '@oover/shared';
-import { fetchAccounts, fetchGoalContributions, fetchRecurring, fetchSettings, fetchTransactions, fetchTransfers, getSupabase } from './db';
+import { deleteLastTransaction, fetchAccounts, fetchCategories, fetchGoalContributions, fetchRecurring, fetchSettings, fetchTransactions, fetchTransfers, fetchUserByTelegramId, getSupabase } from './db';
 
 /**
  * Обработчики команд бота (ROADMAP 1.8–1.9).
@@ -214,3 +215,82 @@ function calcNetWorth(rows: BalanceRow[], accounts: Account[], usdRate: number):
   return round2(sumMoney(uahAmounts));
 }
 
+
+
+/** /backup — отправляет JSON-файл с данными. */
+export async function handleBackup(ctx: Context): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    await ctx.reply('⚠️ База данных не подключена.');
+    return;
+  }
+  try {
+    const [accounts, categories, transactions, recurring, settings] = await Promise.all([
+      fetchAccounts(supabase),
+      fetchCategories(supabase),
+      fetchTransactions(supabase),
+      fetchRecurring(supabase),
+      fetchSettings(supabase),
+    ]);
+    const backup = {
+      exported_at: new Date().toISOString(),
+      accounts,
+      categories,
+      transactions,
+      recurring_payments: recurring,
+      settings,
+    };
+    const json = JSON.stringify(backup, null, 2);
+    const file = new InputFile(Buffer.from(json, 'utf8'), 'backup.json');
+    await ctx.replyWithDocument(file, { caption: '📦 Резервная копия данных' });
+  } catch (err) {
+    console.error('[backup] ошибка:', err instanceof Error ? err.message : err);
+    await ctx.reply('❌ Не удалось создать бэкап.');
+  }
+}
+
+/** /recurring — подсказка по добавлению регулярного платежа. */
+import { startRecurringDialog } from './input';
+
+export async function handleRecurring(ctx: Context): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    await ctx.reply('⚠️ База данных не подключена.');
+    return;
+  }
+  try {
+    const accounts = await fetchAccounts(supabase);
+    const list = accounts.map((a) => ({ id: a.id, name: a.name }));
+    startRecurringDialog(ctx, list);
+  } catch (err) {
+    console.error('[recurring] ошибка:', err instanceof Error ? err.message : err);
+    await ctx.reply('❌ Не удалось начать диалог.');
+  }
+}
+
+
+export async function handleUndo(ctx: Context): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    await ctx.reply('⚠️ База данных не подключена.');
+    return;
+  }
+  const telegramId = ctx.from?.id;
+  if (telegramId === undefined) return;
+  try {
+    const user = await fetchUserByTelegramId(supabase, telegramId);
+    if (!user) {
+      await ctx.reply('Тебя нет в базе.');
+      return;
+    }
+    const deleted = await deleteLastTransaction(supabase, user.id);
+    if (!deleted) {
+      await ctx.reply('Нет операций для удаления.');
+      return;
+    }
+    await ctx.reply(`✅ Удалена последняя операция: ${deleted.description ?? 'без описания'} — ${deleted.amount}`);
+  } catch (err) {
+    console.error('[undo] ошибка:', err instanceof Error ? err.message : err);
+    await ctx.reply('❌ Не удалось удалить операцию.');
+  }
+}

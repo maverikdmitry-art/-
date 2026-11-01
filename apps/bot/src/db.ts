@@ -150,6 +150,44 @@ export async function fetchRecurring(supabase: SupabaseClientAny): Promise<Recur
   return (data ?? []).map((row) => mapRecurringPayment(row as Record<string, unknown>));
 }
 
+export async function insertRecurring(
+  supabase: SupabaseClientAny,
+  rec: {
+    name: string;
+    amount: number;
+    currency: 'UAH' | 'USD';
+    account_id: number;
+    category_id: number | null;
+    user_id: number;
+    day_of_month: number;
+    type: 'income' | 'expense';
+    is_active: boolean;
+    next_due: string;
+  }
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('recurring_payments')
+    .insert(rec)
+    .select('id')
+    .single();
+  if (error) throw new Error(`Не удалось сохранить регулярный платёж: ${error.message}`);
+  return Number((data as Record<string, unknown>).id);
+}
+export async function deleteLastTransaction(supabase: SupabaseClientAny, userId: number): Promise<{ id: number; description: string | null; amount: number } | null> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, description, amount')
+    .eq('user_id', userId)
+    .order('occurred_at', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Не удалось найти операцию: ${error.message}`);
+  if (!data || data.length === 0) return null;
+  const row = data[0] as Record<string, unknown>;
+  const id = Number(row.id);
+  const { error: delError } = await supabase.from('transactions').delete().eq('id', id);
+  if (delError) throw new Error(`Не удалось удалить операцию: ${delError.message}`);
+  return { id, description: (row.description as string) ?? null, amount: Number(row.amount) };
+}
 export async function fetchTransactions(supabase: SupabaseClientAny): Promise<Transaction[]> {
   const { data, error } = await supabase.from('transactions').select('*').order('occurred_at', { ascending: false });
   if (error) throw new Error(`Не удалось загрузить операции: ${error.message}`);

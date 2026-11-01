@@ -48,6 +48,11 @@ function buildGeminiLayer(): GeminiLayer | undefined {
 
 /** Обработка текстового сообщения: разбор и показ превью. */
 export async function handleText(ctx: Context): Promise<void> {
+  const telegramId = ctx.from?.id;
+  if (telegramId !== undefined && hasRecurringPending(telegramId)) {
+    await handleRecurringStep(ctx);
+    return;
+  }
   const supabase = getSupabase();
   if (!supabase) {
     await ctx.reply('⚠️ База данных не подключена. Проверь SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY в .env.');
@@ -55,7 +60,6 @@ export async function handleText(ctx: Context): Promise<void> {
   }
 
   const text = ctx.message?.text;
-  const telegramId = ctx.from?.id;
   if (!text || telegramId === undefined) return;
 
   try {
@@ -215,3 +219,143 @@ function formatPreview(
   return lines.join('\n');
 }
 
+
+
+type RecurringDraft = {
+  name?: string;
+  amount?: number;
+  account_id?: number;
+  day_of_month?: number;
+  type?: 'income' | 'expense';
+};
+type RecurringState = { step: 'name' | 'amount' | 'account' | 'day' | 'type' | 'preview'; draft: RecurringDraft; accounts: { id: number; name: string }[] };
+const pendingRecurring = new Map<number, RecurringState>();
+
+export function startRecurringDialog(ctx: Context, accounts: { id: number; name: string }[]): void {
+  const telegramId = ctx.from?.id;
+  if (telegramId === undefined) return;
+  pendingRecurring.set(telegramId, { step: 'name', draft: {}, accounts });
+  ctx.reply('Название платежа? (например: Интернет)');
+}
+
+export function hasRecurringPending(telegramId: number): boolean {
+  return pendingRecurring.has(telegramId);
+}
+
+export async function handleRecurringStep(ctx: Context): Promise<void> {
+  const telegramId = ctx.from?.id;
+  if (telegramId === undefined) return;
+  const state = pendingRecurring.get(telegramId);
+  if (!state) return;
+  const text = ctx.message?.text?.trim();
+  if (!text) return;
+
+  if (state.step === 'name') {
+    state.draft.name = text;
+    state.step = 'amount';
+    await ctx.reply('Сумма? (например: 300)');
+    return;
+  }
+  if (state.step === 'amount') {
+    const num = Number(text.replace(',', '.'));
+    if (!num || num <= 0) { await ctx.reply('Введите число больше 0.'); return; }
+    state.draft.amount = num;
+    state.step = 'account';
+    const list = state.accounts.map((a, i) => `${i + 1} — ${a.name}`).join('\n');
+    await ctx.reply(`Счёт? Введи номер:\n${list}`);
+    return;
+  }
+  if (state.step === 'account') {
+    const idx = Number(text) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= state.accounts.length) {
+      await ctx.reply('Неверный номер. Попробуй ещё раз.');
+      return;
+    }
+    state.draft.account_id = state.accounts[idx].id;
+    state.step = 'day';
+    await ctx.reply('День месяца (1–31)?');
+    return;
+  }
+  if (state.step === 'day') {
+    const day = Number(text);
+    if (isNaN(day) || day < 1 || day > 31) { await ctx.reply('Введите число от 1 до 31.'); return; }
+    state.draft.day_of_month = day;
+    state.step = 'type';
+    await ctx.reply('Тип операции: доход или расход?');
+    return;
+  }
+  if (state.step === 'type') {
+    const t = text.toLowerCase();
+    let type: 'income' | 'expense' | null = null;
+    if (t.includes('доход') || t === 'income') type = 'income';
+    else if (t.includes('расход') || t === 'expense') type = 'expense';
+    if (!type) { await ctx.reply('Введите «доход» или «расход».'); return; }
+    state.draft.type = type;
+    state.step = 'preview';
+    console.log('[recurring] state after type:', state.step, state.draft);
+    const d = state.draft;
+    const acc = state.accounts.find(a => a.id === d.account_id)?.name;
+    const { InlineKeyboard } = await import('grammy');
+    const kb = new InlineKeyboard().text('✅ Сохранить', 'rec:save').row().text('✖️ Отмена', 'rec:cancel');
+    await ctx.reply(
+      `🧾 Новый регулярный платёж\n` +
+        `Название: ${d.name}\n` +
+        `Сумма: ${d.amount}\n` +
+        `Счёт: ${acc}\n` +
+        `День: ${d.day_of_month}\n` +
+        `Тип: ${d.type}\n\n` +
+        'Нажми кнопку «Сохранить» или «Отмена».',
+      { reply_markup: kb }
+    );
+    return;
+  }
+}
+
+export async function handleRecurringSave(ctx: Context): Promise<void> {
+  const telegramId = ctx.from?.id;
+  if (telegramId === undefined) return;
+  const state = pendingRecurring.get(telegramId);
+  console.log('[recurring save] telegramId:', telegramId, 'state:', state?.step);
+  if (!state || state.step !== 'preview') {
+    await ctx.answerCallbackQuery({ text: 'Нет данных' });
+    return;
+  }
+  pendingRecurring.delete(telegramId);
+  const supabase = getSupabase();
+  if (!supabase) {
+    await ctx.answerCallbackQuery({ text: 'БД недоступна' });
+    return;
+  }
+  try {
+    const user = await fetchUserByTelegramId(supabase, telegramId);
+    if (!user) {
+      await ctx.answerCallbackQuery({ text: 'Пользователь не найден' });
+      return;
+    }
+    const d = state.draft;
+    const today = new Date();
+    const nextDue = new Date(today.getFullYear(), today.getMonth() + 1, d.day_of_month!).toISOString().slice(0, 10);
+    const { insertRecurring } = await import('./db');
+    await insertRecurring(supabase, {
+      name: d.name!,
+      amount: d.amount!,
+      currency: 'UAH',
+      account_id: d.account_id!,
+      category_id: null,
+      user_id: user.id,
+      day_of_month: d.day_of_month!,
+      type: d.type!,
+      is_active: true,
+      next_due: nextDue,
+    });
+    await ctx.editMessageText('✅ Регулярный платёж сохранён.');
+    await ctx.answerCallbackQuery();
+  } catch (err) {
+    console.error('[recurring save] ошибка:', err instanceof Error ? err.message : err);
+    await ctx.answerCallbackQuery({ text: 'Ошибка сохранения' });
+  }
+}
+
+export function cancelRecurring(telegramId: number): boolean {
+  return pendingRecurring.delete(telegramId);
+}

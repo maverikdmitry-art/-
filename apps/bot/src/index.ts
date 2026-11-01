@@ -1,7 +1,7 @@
 import { Bot, GrammyError } from 'grammy';
 import { config } from './config';
-import { handleBalance, handleCancelCommand, handleExpense, handleHelp, handleIncome, handleStart, handleStats, handleToday } from './handlers';
-import { handleCancel, handleEdit, handleSave, handleText } from './input';
+import { handleBalance, handleBackup, handleCancelCommand, handleExpense, handleHelp, handleIncome, handleRecurring, handleStart, handleStats, handleToday, handleUndo } from './handlers';
+import { cancelRecurring, handleCancel, handleEdit, handleRecurringSave, handleSave, handleText } from './input';
 
 /**
  * Точка входа Telegram-бота OoverrFinancee (ROADMAP 1.7–1.8).
@@ -30,10 +30,13 @@ bot.use(async (ctx, next) => {
 bot.command('start', handleStart);
 bot.command('help', handleHelp);
 bot.command('balance', handleBalance);
+bot.command('backup', handleBackup);
+bot.command('recurring', handleRecurring);
 bot.command('income', handleIncome);
 bot.command('expense', handleExpense);
 bot.command('cancel', handleCancelCommand);
 bot.command('today', handleToday);
+bot.command('undo', handleUndo);
 bot.command('stats', handleStats);
 
 // Ввод трат: любой текст (кроме команд) → разбор → превью с кнопками.
@@ -43,6 +46,15 @@ bot.on('message:text', handleText);
 bot.callbackQuery('tx:save', handleSave);
 bot.callbackQuery('tx:edit', handleEdit);
 bot.callbackQuery('tx:cancel', handleCancel);
+
+// Кнопки подтверждения/отмены для регулярного платежа.
+bot.callbackQuery('rec:save', handleRecurringSave);
+bot.callbackQuery('rec:cancel', async (ctx) => {
+  const id = ctx.from?.id;
+  if (id !== undefined) cancelRecurring(id);
+  await ctx.editMessageText('✖️ Отменено.');
+  await ctx.answerCallbackQuery();
+});
 
 // Ловим любые ошибки обработчиков, чтобы один сбой не ронял бота.
 bot.catch((err) => {

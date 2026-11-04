@@ -9,6 +9,12 @@ import {
   getSupabase,
   insertTransaction,
 } from './db';
+import {
+  checkAndSendOverspendAlert,
+  calculateRemainingLimitPct,
+  sendPartnerExpenseNotification,
+  spenderNameFromCtx,
+} from './notifications';
 
 /**
  * Ввод трат из Telegram (ROADMAP 1.8).
@@ -136,6 +142,22 @@ export async function handleSave(ctx: Context): Promise<void> {
     }
     await ctx.editMessageText(`${draft.previewText}\n\n✅ Сохранено в базу.`);
     await ctx.answerCallbackQuery();
+
+    // Уведомления партнёру и алерт о перерасходе — только для расходов.
+    if (draft.tx.type === 'expense') {
+      const spenderName = spenderNameFromCtx(ctx);
+      await sendPartnerExpenseNotification(ctx, telegramId, spenderName, {
+        amount: draft.tx.amount,
+        currency: draft.tx.currency,
+        description: draft.tx.description,
+        account_id: draft.tx.account_id,
+      });
+
+      const limit = await calculateRemainingLimitPct(supabase, telegramId);
+      if (limit?.isAlert) {
+        await checkAndSendOverspendAlert(ctx, telegramId, limit.pct);
+      }
+    }
   } catch (err) {
     console.error('[save] ошибка:', err instanceof Error ? err.message : err);
     await ctx.answerCallbackQuery({ text: 'Не удалось сохранить' });

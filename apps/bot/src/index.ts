@@ -2,6 +2,7 @@ import { Bot, GrammyError } from 'grammy';
 import { config } from './config';
 import { handleBalance, handleBackup, handleCancelCommand, handleExpense, handleHelp, handleIncome, handleRecurring, handleStart, handleStats, handleStatsMonth, handleStatsWeek, handleToday, handleUndo } from './handlers';
 import { cancelRecurring, handleCancel, handleEdit, handleRecurringSave, handleSave, handleText } from './input';
+import { handleNotifyCommand } from './notifications';
 
 /**
  * Точка входа Telegram-бота OoverrFinancee (ROADMAP 1.7–1.8).
@@ -38,6 +39,7 @@ bot.command('cancel', handleCancelCommand);
 bot.command('today', handleToday);
 bot.command('undo', handleUndo);
 bot.command('stats', handleStats);
+bot.command('notify', handleNotifyCommand);
 
 // Постоянная клавиатура под чатом: кнопки → команды.
 bot.on('message:text', async (ctx, next) => {
@@ -114,6 +116,7 @@ await bot.api.setMyCommands([
   { command: 'backup', description: 'Резервная копия' },
   { command: 'undo', description: 'Удалить последнюю операцию' },
   { command: 'cancel', description: 'Отменить ввод' },
+  { command: 'notify', description: 'Вкл/выкл уведомления партнёру' },
 ]);
 
 bot.start({

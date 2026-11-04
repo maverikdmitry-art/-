@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
  * Конфиг сборки веб-дашборда.
  *  - Читает переменные из КОРНЕВОГО .env (envDir = корень репозитория).
  *  - Публично в бандл попадают ТОЛЬКО SUPABASE_URL и SUPABASE_ANON_KEY.
- *  - service_role-ключ и GEMINI_API_KEY в браузер не попадают никогда.
+ *  - service_role-ключ в браузер не попадает никогда.
  *  - @oover/shared разрешается в исходники общего пакета (без отдельной сборки).
  */
 export default defineConfig(({ mode }) => {

@@ -1,6 +1,6 @@
 import { Bot, GrammyError } from 'grammy';
 import { config } from './config';
-import { handleBalance, handleBackup, handleCancelCommand, handleExpense, handleHelp, handleIncome, handleRecurring, handleStart, handleStats, handleToday, handleUndo } from './handlers';
+import { handleBalance, handleBackup, handleCancelCommand, handleExpense, handleHelp, handleIncome, handleRecurring, handleStart, handleStats, handleStatsMonth, handleStatsWeek, handleToday, handleUndo } from './handlers';
 import { cancelRecurring, handleCancel, handleEdit, handleRecurringSave, handleSave, handleText } from './input';
 
 /**
@@ -39,8 +39,34 @@ bot.command('today', handleToday);
 bot.command('undo', handleUndo);
 bot.command('stats', handleStats);
 
+// Постоянная клавиатура под чатом: кнопки → команды.
+bot.on('message:text', async (ctx, next) => {
+  const text = ctx.message?.text;
+  if (!text) return await next();
+
+  const buttonToHandler: Record<string, () => Promise<void>> = {
+    '💰 Баланс': () => handleBalance(ctx),
+    '📅 Сегодня': () => handleToday(ctx),
+    '📊 Статистика': () => handleStats(ctx),
+    '💸 Трата': () => handleExpense(ctx),
+    '💰 Доход': () => handleIncome(ctx),
+    '❌ Отмена': () => handleCancelCommand(ctx),
+  };
+
+  const handler = buttonToHandler[text];
+  if (handler) {
+    await handler();
+    return;
+  }
+  await next();
+});
+
 // Ввод трат: любой текст (кроме команд) → разбор → превью с кнопками.
 bot.on('message:text', handleText);
+
+// Кнопки выбора периода статистики.
+bot.callbackQuery('stats:month', handleStatsMonth);
+bot.callbackQuery('stats:week', handleStatsWeek);
 
 // Кнопки подтверждения/отмены под превью операции.
 bot.callbackQuery('tx:save', handleSave);
@@ -74,9 +100,21 @@ if (!config.SUPABASE_URL || !config.SUPABASE_SERVICE_ROLE_KEY) {
       'Команда /balance и ввод трат будут сообщать об отсутствии подключения.'
   );
 }
-if (!config.GEMINI_API_KEY) {
-  console.warn('[config] GEMINI_API_KEY не задан — разбор трат работает на regex-фоллбэке.');
-}
+
+// Регистрируем команды в BotFather (кнопка "/" в Telegram).
+await bot.api.setMyCommands([
+  { command: 'start', description: 'Приветствие и команды' },
+  { command: 'help', description: 'Справка' },
+  { command: 'balance', description: 'Баланс счетов и Капитал' },
+  { command: 'today', description: 'Доходы и расходы за сегодня' },
+  { command: 'stats', description: 'Статистика за месяц' },
+  { command: 'income', description: 'Внести доход' },
+  { command: 'expense', description: 'Внести трату' },
+  { command: 'recurring', description: 'Регулярный платёж' },
+  { command: 'backup', description: 'Резервная копия' },
+  { command: 'undo', description: 'Удалить последнюю операцию' },
+  { command: 'cancel', description: 'Отменить ввод' },
+]);
 
 bot.start({
   onStart: (info) => {

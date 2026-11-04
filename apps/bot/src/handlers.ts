@@ -1,8 +1,8 @@
 import type { Context } from 'grammy';
-import { InputFile } from 'grammy';
-import { calculateMonthComparison, calculateSafeToSpend, convertToUah, formatMoney, round2, sumMoney } from '@oover/shared';
-import type { Account, SupabaseClientAny } from '@oover/shared';
-import { deleteLastTransaction, fetchAccounts, fetchCategories, fetchGoalContributions, fetchRecurring, fetchSettings, fetchTransactions, fetchTransfers, fetchUserByTelegramId, getSupabase } from './db';
+import { InputFile, Keyboard, InlineKeyboard } from 'grammy';
+import { calculateAccountBalance, convertToUah, formatMoney, round2, sumMoney, todayYmd, toYmd, toDecimal } from '@oover/shared';
+import { cancelPending, startRecurringDialog } from './input';
+import { deleteLastTransaction, fetchAccounts, fetchCategories, fetchRecurring, fetchSettings, fetchTransactions, fetchTransfers, fetchUserByTelegramId, getSupabase } from './db';
 
 /**
  * Обработчики команд бота (ROADMAP 1.8–1.9).
@@ -16,36 +16,48 @@ const NO_DB_MESSAGE =
 export async function handleStart(ctx: Context): Promise<void> {
   const name = ctx.from?.first_name?.trim();
   const greeting = name ? `Привет, ${name}!` : 'Привет!';
+  const keyboard = new Keyboard()
+    .text('💰 Баланс').text('📅 Сегодня').row()
+    .text('💸 Трата').text('💰 Доход').row()
+    .text('📊 Статистика').text('❌ Отмена');
   await ctx.reply(
     `${greeting}\n\n` +
       'Я финансовый трекер OoverrFinancee.\n\n' +
-      'Команды:\n' +
-      '/balance — баланс по счетам и Net Worth\n' +
-      '/help — справка\n\n' +
-      'Чтобы записать трату, просто напиши:\n' +
+      'Под чатом уже есть кнопки — нажимай, чтобы быстро посмотреть баланс, сегодня или статистику.\n\n' +
+      'Чтобы записать трату или доход, просто напиши текстом:\n' +
       '• «кофе 150» — расход 150 ₴\n' +
-      '• «такси 340 болт» — с категорией Транспорт\n' +
       '• «зп 20000» — доход\n' +
       '• «15$ такси» — расход в долларах\n\n' +
-      'Я покажу разбор и спрошу подтверждение перед сохранением.'
+      'Я покажу разбор и спрошу подтверждение перед сохранением.',
+    { reply_markup: keyboard }
   );
 }
 
 /** /help — список команд. */
 export async function handleHelp(ctx: Context): Promise<void> {
   await ctx.reply(
-    'Команды бота:\n\n' +
-      '/balance — текущий баланс счетов и Net Worth\n' +
+    '📋 Все команды:\n\n' +
+      '/start — приветствие\n' +
       '/help — эта справка\n' +
-      '/start — приветствие\n\n' +
-      'Ввод трат: напиши сумму текстом, например «кофе 150» или «зп 20000».'
+      '/balance — баланс по счетам и Капитал\n' +
+      '/today — доходы и расходы за сегодня\n' +
+      '/stats — статистика за месяц или неделю\n' +
+      '/income — внести доход\n' +
+      '/expense — внести трату\n' +
+      '/recurring — регулярный платёж\n' +
+      '/backup — резервная копия данных\n' +
+      '/undo — удалить последнюю операцию\n' +
+      '/cancel — отменить текущий ввод\n\n' +
+      '💬 Ввод текстом:\n' +
+      '• «кофе 150» — расход 150 ₴\n' +
+      '• «такси 340 болт» — с категорией Транспорт\n' +
+      '• «зп 20000» — доход\n' +
+      '• «15$ такси» — расход в долларах\n\n' +
+      'Под чатом есть кнопки для быстрого доступа. Под превью операции нажимай «Сохранить», «Изменить» или «Отмена».'
   );
 }
 
-/**
- * /balance — читает представление account_balances и выводит баланс счетов.
- * Если БД не подключена или запрос упал — понятное сообщение вместо ошибки.
- */
+/** /today — показать доходы и расходы за сегодня (по Europe/Kyiv). */
 export async function handleToday(ctx: Context): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) {
@@ -53,61 +65,184 @@ export async function handleToday(ctx: Context): Promise<void> {
     return;
   }
   try {
-    const [accounts, transactions, transfers, contributions, recurring, settings] = await Promise.all([
+    const [accounts, transactions, settings] = await Promise.all([
       fetchAccounts(supabase),
       fetchTransactions(supabase),
-      fetchTransfers(supabase),
-      fetchGoalContributions(supabase),
-      fetchRecurring(supabase),
       fetchSettings(supabase),
     ]);
-    const safe = calculateSafeToSpend(accounts, transactions, transfers, contributions, recurring, settings);
-    if (!safe.hasNextIncomeDate) {
-      await ctx.reply('📅 Дата следующего дохода не задана. Укажи её в дашборде (Настройки).');
-      return;
+    const today = todayYmd();
+    const todayTxs = transactions.filter((tx) => toYmd(tx.occurred_at) === today);
+    const income = todayTxs.filter((tx) => tx.type === 'income');
+    const expense = todayTxs.filter((tx) => tx.type === 'expense');
+    const incomeTotalUah = round2(sumMoney(income.map((tx) => convertToUah(tx.amount, tx.currency, settings.usd_rate))));
+    const expenseTotalUah = round2(sumMoney(expense.map((tx) => convertToUah(tx.amount, tx.currency, settings.usd_rate))));
+
+    const lines: string[] = ['📅 Сегодня:'];
+    if (income.length > 0) {
+      lines.push(`\n💰 Доходы: ${formatMoney(incomeTotalUah, 'UAH')}`);
+      for (const tx of income) {
+        const acc = accounts.find((a) => a.id === tx.account_id)?.name ?? '—';
+        lines.push(`• +${formatMoney(tx.amount, tx.currency)} — ${tx.description ?? 'без описания'} (${acc})`);
+      }
     }
-    await ctx.reply(
-      [
-        '📊 Сегодня:',
-        `Потрачено: ${formatMoney(safe.spentToday, 'UAH')}`,
-        `Лимит на день: ${formatMoney(safe.safePerDay, 'UAH')}`,
-        `Осталось: ${formatMoney(safe.remainingLimit, 'UAH')}` + (safe.isOverLimit ? ' ⚠️' : ''),
-        `До дохода: ${safe.daysLeft} дн.`,
-      ].join('\n')
-    );
+    if (expense.length > 0) {
+      lines.push(`\n💸 Расходы: ${formatMoney(expenseTotalUah, 'UAH')}`);
+      for (const tx of expense) {
+        const acc = accounts.find((a) => a.id === tx.account_id)?.name ?? '—';
+        lines.push(`• -${formatMoney(tx.amount, tx.currency)} — ${tx.description ?? 'без описания'} (${acc})`);
+      }
+    }
+    if (income.length === 0 && expense.length === 0) {
+      lines.push('Операций за сегодня нет.');
+    }
+
+    await ctx.reply(lines.join('\n'));
   } catch (error) {
-    await ctx.reply('❌ Не удалось получить данные. Попробуй позже.');
+    await ctx.reply('❌ Не удалось получить операции за сегодня. Попробуй позже.');
     console.error('[today] ошибка:', error instanceof Error ? error.message : error);
   }
 }
 
 
 export async function handleStats(ctx: Context): Promise<void> {
+  const keyboard = new InlineKeyboard()
+    .text('📅 Месяц', 'stats:month')
+    .text('📅 Неделя', 'stats:week');
+  await ctx.reply('📈 Выберите период статистики:', { reply_markup: keyboard });
+}
+
+/** Красивая строка разницы с прошлым периодом. */
+function formatDelta(label: string, cur: number, prev: number): string {
+  const delta = round2(toDecimal(cur).minus(prev));
+  if (delta > 0) return `▲ ${label} на ${formatMoney(delta, 'UAH')} больше`;
+  if (delta < 0) return `▼ ${label} на ${formatMoney(Math.abs(delta), 'UAH')} меньше`;
+  return `— ${label} без изменений`;
+}
+
+/** /stats месяц — доходы/расходы за месяц с сравнением прошлого месяца. */
+export async function handleStatsMonth(ctx: Context): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) {
     await ctx.reply(NO_DB_MESSAGE);
     return;
   }
   try {
-    const settings = await fetchSettings(supabase);
-    const transactions = await fetchTransactions(supabase);
-    const stats = calculateMonthComparison(transactions, settings.usd_rate);
+    const [transactions, settings] = await Promise.all([
+      fetchTransactions(supabase),
+      fetchSettings(supabase),
+    ]);
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth();
+    const prevMonth = new Date(curYear, curMonth - 1, 1);
+
+    let curExpense = 0;
+    let curIncome = 0;
+    let prevExpense = 0;
+    let prevIncome = 0;
+
+    for (const tx of transactions) {
+      if (tx.type === 'adjustment') continue;
+      const date = new Date(tx.occurred_at);
+      const amount = convertToUah(tx.amount, tx.currency, settings.usd_rate);
+      if (date.getFullYear() === curYear && date.getMonth() === curMonth) {
+        if (tx.type === 'expense') curExpense += amount;
+        if (tx.type === 'income') curIncome += amount;
+      } else if (date.getFullYear() === prevMonth.getFullYear() && date.getMonth() === prevMonth.getMonth()) {
+        if (tx.type === 'expense') prevExpense += amount;
+        if (tx.type === 'income') prevIncome += amount;
+      }
+    }
+
+    curExpense = round2(curExpense);
+    curIncome = round2(curIncome);
+    prevExpense = round2(prevExpense);
+    prevIncome = round2(prevIncome);
+
     await ctx.reply(
       [
-        '📈 Статистика за текущий месяц:',
+        '📈 Статистика за месяц:',
+        `💸 Потрачено: ${formatMoney(curExpense, 'UAH')}`,
+        `💰 Доходов: ${formatMoney(curIncome, 'UAH')}`,
+        `📊 Баланс месяца: ${formatMoney(round2(toDecimal(curIncome).minus(curExpense)), 'UAH')}`,
         '',
-        `• Расходы: ${formatMoney(stats.curExpense, 'UAH')} (прошлый: ${formatMoney(stats.prevExpense, 'UAH')}, Δ ${stats.expenseDelta >= 0 ? '+' : ''}${formatMoney(stats.expenseDelta, 'UAH')})`,
-        `• Доходы: ${formatMoney(stats.curIncome, 'UAH')} (прошлый: ${formatMoney(stats.prevIncome, 'UAH')}, Δ ${stats.incomeDelta >= 0 ? '+' : ''}${formatMoney(stats.incomeDelta, 'UAH')})`,
-        `• Баланс месяца: ${formatMoney(stats.curIncome - stats.curExpense, 'UAH')}`,
+        'В сравнении с прошлым месяцем:',
+        formatDelta('Потрачено', curExpense, prevExpense),
+        formatDelta('Доходов', curIncome, prevIncome),
       ].join('\n')
     );
   } catch (error) {
-    await ctx.reply('❌ Не удалось получить статистику. Попробуй позже.');
-    console.error('[stats] ошибка:', error instanceof Error ? error.message : error);
+    await ctx.reply('❌ Не удалось получить статистику за месяц. Попробуй позже.');
+    console.error('[stats:month] ошибка:', error instanceof Error ? error.message : error);
+  }
+}
+
+/** /stats неделя — доходы/расходы за неделю с сравнением прошлой недели. */
+export async function handleStatsWeek(ctx: Context): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    await ctx.reply(NO_DB_MESSAGE);
+    return;
+  }
+  try {
+    const [transactions, settings] = await Promise.all([
+      fetchTransactions(supabase),
+      fetchSettings(supabase),
+    ]);
+    const now = new Date();
+    const dayIndex = (now.getDay() + 6) % 7; // понедельник = 0
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - dayIndex);
+    weekStart.setHours(0, 0, 0, 0);
+    const prevWeekStart = new Date(weekStart);
+    prevWeekStart.setDate(weekStart.getDate() - 7);
+    const prevWeekEnd = new Date(weekStart);
+    prevWeekEnd.setDate(weekStart.getDate() - 1);
+    prevWeekEnd.setHours(23, 59, 59, 999);
+
+    let curExpense = 0;
+    let curIncome = 0;
+    let prevExpense = 0;
+    let prevIncome = 0;
+
+    for (const tx of transactions) {
+      if (tx.type === 'adjustment') continue;
+      const date = new Date(tx.occurred_at);
+      const amount = convertToUah(tx.amount, tx.currency, settings.usd_rate);
+      if (date >= weekStart && date <= now) {
+        if (tx.type === 'expense') curExpense += amount;
+        if (tx.type === 'income') curIncome += amount;
+      } else if (date >= prevWeekStart && date <= prevWeekEnd) {
+        if (tx.type === 'expense') prevExpense += amount;
+        if (tx.type === 'income') prevIncome += amount;
+      }
+    }
+
+    curExpense = round2(curExpense);
+    curIncome = round2(curIncome);
+    prevExpense = round2(prevExpense);
+    prevIncome = round2(prevIncome);
+
+    await ctx.reply(
+      [
+        '📈 Статистика за неделю:',
+        `💸 Потрачено: ${formatMoney(curExpense, 'UAH')}`,
+        `💰 Доходов: ${formatMoney(curIncome, 'UAH')}`,
+        `📊 Баланс недели: ${formatMoney(round2(toDecimal(curIncome).minus(curExpense)), 'UAH')}`,
+        '',
+        'В сравнении с прошлой неделей:',
+        formatDelta('Потрачено', curExpense, prevExpense),
+        formatDelta('Доходов', curIncome, prevIncome),
+      ].join('\n')
+    );
+  } catch (error) {
+    await ctx.reply('❌ Не удалось получить статистику за неделю. Попробуй позже.');
+    console.error('[stats:week] ошибка:', error instanceof Error ? error.message : error);
   }
 }
 
 
+/** /balance — баланс по счетам и Капитал. */
 export async function handleBalance(ctx: Context): Promise<void> {
   const supabase = getSupabase();
   if (!supabase) {
@@ -116,67 +251,47 @@ export async function handleBalance(ctx: Context): Promise<void> {
   }
 
   try {
-    const accounts = await fetchAccounts(supabase);
-    const kindById = new Map(accounts.map((a) => [a.id, a.kind]));
-    const rows = await fetchAccountBalances(supabase, kindById);
+    const [accounts, transactions, transfers, settings] = await Promise.all([
+      fetchAccounts(supabase),
+      fetchTransactions(supabase),
+      fetchTransfers(supabase),
+      fetchSettings(supabase),
+    ]);
 
-    if (rows.length === 0) {
-      await ctx.reply('Пока нет ни одного счёта. Добавь счета в дашборде или через /setup.');
+    const activeAccounts = accounts.filter((a) => a.is_active);
+    if (activeAccounts.length === 0) {
+      await ctx.reply('Пока нет ни одного активного счёта. Добавь счета в дашборде.');
       return;
     }
 
-    const lines = rows.map((row) => {
-      const kind = row.kind === 'cash' ? ' (нал.)' : '';
-      return `• ${row.account_name}${kind}: ${formatMoney(row.balance, row.currency)}`;
-    });
+    const lines: string[] = ['💰 Баланс по счетам:'];
+    let totalUah = 0;
+    let hasNonZero = false;
 
-    // Net Worth: переводим все активные счета в UAH по курсу из настроек.
-    const settings = await fetchSettings(supabase);
-    const netWorth = calcNetWorth(rows, accounts, settings.usd_rate);
+    for (const acc of activeAccounts) {
+      const balance = calculateAccountBalance(acc, transactions, transfers);
+      if (balance === 0) continue;
+      hasNonZero = true;
+      lines.push(`• ${acc.name}: ${formatMoney(balance, acc.currency)}`);
+      totalUah += convertToUah(balance, acc.currency, settings.usd_rate);
+    }
 
-    await ctx.reply(
-      ['💰 Баланс по счетам:', ...lines, '', `📊 Net Worth: ${formatMoney(netWorth, 'UAH')}`].join(
-        '\n'
-      )
-    );
+    if (!hasNonZero) {
+      await ctx.reply('💰 Баланс по счетам:\nНет счетов с ненулевым балансом.');
+      return;
+    }
+
+    totalUah = round2(totalUah);
+    lines.push('', `📊 Капитал: ${formatMoney(totalUah, 'UAH')}`);
+
+    await ctx.reply(lines.join('\n'));
   } catch (error) {
     await ctx.reply('❌ Не удалось получить баланс. Попробуй позже.');
     console.error('[balance] ошибка:', error instanceof Error ? error.message : error);
   }
 }
 
-type BalanceRow = {
-  account_id: number;
-  account_name: string;
-  currency: string;
-  balance: number;
-  kind: 'card' | 'cash';
-};
 
-/** Читает представление account_balances (единый источник балансов, учитывает переводы). */
-async function fetchAccountBalances(
-  supabase: SupabaseClientAny,
-  kindById: Map<number, 'card' | 'cash'>
-): Promise<BalanceRow[]> {
-  const { data, error } = await supabase
-    .from('account_balances')
-    .select('account_id, account_name, currency, balance');
-  if (error) throw new Error(`account_balances: ${error.message}`);
-
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const accountId = Number(row.account_id);
-    return {
-      account_id: accountId,
-      account_name: String(row.account_name ?? ''),
-      currency: String(row.currency ?? 'UAH'),
-      balance: Number(row.balance ?? 0),
-      kind: kindById.get(accountId) ?? 'card',
-    };
-  });
-}
-
-
-import { cancelPending } from './input';
 
 /** /income — подсказка по вводу дохода. */
 export async function handleIncome(ctx: Context): Promise<void> {
@@ -207,15 +322,6 @@ export async function handleCancelCommand(ctx: Context): Promise<void> {
     await ctx.reply('Нет ожидающей операции для отмены.');
   }
 }
-function calcNetWorth(rows: BalanceRow[], accounts: Account[], usdRate: number): number {
-  const activeIds = new Set(accounts.filter((a) => a.is_active).map((a) => a.id));
-  const uahAmounts = rows
-    .filter((row) => activeIds.has(row.account_id))
-    .map((row) => convertToUah(row.balance, row.currency as 'UAH' | 'USD', usdRate));
-  return round2(sumMoney(uahAmounts));
-}
-
-
 
 /** /backup — отправляет JSON-файл с данными. */
 export async function handleBackup(ctx: Context): Promise<void> {
@@ -250,7 +356,6 @@ export async function handleBackup(ctx: Context): Promise<void> {
 }
 
 /** /recurring — подсказка по добавлению регулярного платежа. */
-import { startRecurringDialog } from './input';
 
 export async function handleRecurring(ctx: Context): Promise<void> {
   const supabase = getSupabase();

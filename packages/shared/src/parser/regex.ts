@@ -1,8 +1,7 @@
 import type { Account, Category, Currency, TransactionType } from '../types';
 
 /**
- * Regex-парсер — фоллбэк, который работает без интернета и без LLM.
- * Каскад ввода: Gemini → regex → status='needs_review' (бот не теряет ввод).
+ * Реgex-парсер — фоллбэк, который работает без интернета и без LLM.
  */
 
 export type ParseStatus = 'ok' | 'needs_review';

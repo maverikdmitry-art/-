@@ -7,18 +7,13 @@
  *   money.ts        — деньги без float (decimal.js)
  *   time.ts         — границы суток по Europe/Kyiv
  *   calculations.ts — баланс, Net Worth, Safe-to-spend
- *   parser/         — regex-парсер + каскад Gemini → regex
- *   gemini/         — клиент Gemini, LLM-парсер, распознавание голоса
+ *   parser/         — regex-парсер
  *   supabase/       — фабрики клиентов и мапперы строк БД
  */
-
 export * from './types';
 export * from './money';
 export * from './time';
 export * from './calculations';
 export * from './parser';
-export * from './gemini/client';
-export * from './gemini/parse';
-export * from './gemini/transcribe';
 export * from './supabase/client';
 export * from './supabase/mappers';

@@ -1,14 +1,6 @@
 import { Context, InlineKeyboard } from 'grammy';
-import {
-  convertToUah,
-  createGeminiClient,
-  formatMoney,
-  parseInput,
-  type GeminiLayer,
-  type ParseResult,
-} from '@oover/shared';
+import { convertToUah, formatMoney, parseInput, type ParseResult } from '@oover/shared';
 import type { Account, Category, NewTransaction } from '@oover/shared';
-import { config } from './config';
 import {
   fetchAccounts,
   fetchCategories,
@@ -21,7 +13,7 @@ import {
 /**
  * Ввод трат из Telegram (ROADMAP 1.8).
  *
- * Сценарий: пользователь пишет «кофе 150 мак» → parseInput (Gemini → regex) →
+ * Сценарий: пользователь пишет «кофе 150 мак» → parseInput (регулярные выражения) →
  * превью с кнопками [Сохранить] [Отмена] → по кнопке «Сохранить» — запись в БД.
  * Черновик живёт в памяти процесса (бот приватный, 2 пользователя).
  */
@@ -34,17 +26,6 @@ type PendingTx = {
 
 // userId → ожидающая подтверждения операция.
 const pending = new Map<number, PendingTx>();
-
-/** Собирает Gemini-слой, если ключ задан. Иначе — undefined (работает regex). */
-function buildGeminiLayer(): GeminiLayer | undefined {
-  if (!config.GEMINI_API_KEY) return undefined;
-  try {
-    return { client: createGeminiClient(config.GEMINI_API_KEY), model: config.GEMINI_MODEL };
-  } catch (err) {
-    console.error('[gemini] не удалось создать клиент:', err instanceof Error ? err.message : err);
-    return undefined;
-  }
-}
 
 /** Обработка текстового сообщения: разбор и показ превью. */
 export async function handleText(ctx: Context): Promise<void> {
@@ -75,15 +56,11 @@ export async function handleText(ctx: Context): Promise<void> {
       fetchLastUsedAccountId(supabase, user.id),
     ]);
 
-    const gemini = buildGeminiLayer();
     const result: ParseResult = await parseInput({
       text,
       categories,
       accounts,
       lastUsedAccountId,
-      gemini,
-      onLlmError: (err) =>
-        console.error('[parse] Gemini сшибся, фоллбэк на regex:', err instanceof Error ? err.message : err),
     });
 
     if (result.amount <= 0) {

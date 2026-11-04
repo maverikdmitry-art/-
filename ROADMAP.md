@@ -4,7 +4,7 @@
 К следующему шагу переходим только когда проверка текущего пройдена.
 Правила для ИИ: [`PROJECT_RULES.md`](./PROJECT_RULES.md). Архитектура: [`ARCHITECTURE.md`](./ARCHITECTURE.md). БД: [`DATABASE.md`](./DATABASE.md).
 
-Стек: Node.js 20+, TypeScript, npm workspaces, Supabase, React/Vite дашборд, Gemini, GrammY-бот.
+Стек: Node.js 20+, TypeScript, npm workspaces, Supabase, React/Vite дашборд, GrammY-бот.
 
 ---
 
@@ -26,8 +26,7 @@
 | [x] 0.1 | Установить Node.js 20+ и VS Code. Проверить, что проект использует npm workspaces: корневой `package.json` указывает на `packages/*` и `apps/*`. | В терминале `node --version` показывает 20+. Зависимости установлены через `npm install` на корне. |
 | [x] 0.2 | Создать бота в Telegram через @BotFather, получить токен. Узнать свой Telegram ID и ID Даши (бот @userinfobot). | Токен и два ID записаны. |
 | [x] 0.3 | Создать **отдельный тестовый** проект в Supabase. Взять URL, anon-ключ и service_role-ключ. | Проект открывается, SQL Editor доступен. |
-| [x] 0.4 | Создать ключ Google Gemini API (https://aistudio.google.com/apikey) для LLM-парсера и распознавания голоса. | Ключ записан в `.env`. |
-| [x] 0.5 | Создать структуру папок из ARCHITECTURE.md, файл `.env` по шаблону `.env.example`. Структура: `apps/web` (React-дашборд), `apps/bot` (GrammY-бот), `packages/shared` (общий код), `supabase/schema.sql`. | Структура есть, `.env` заполнен и закреплён в `.gitignore`. |
+| [x] 0.4 | Создать структуру папок из ARCHITECTURE.md, файл `.env` по шаблону `.env.example`. Структура: `apps/web` (React-дашборд), `apps/bot` (GrammY-бот), `packages/shared` (общий код), `supabase/schema.sql`. | Структура есть, `.env` заполнен и закреплён в `.gitignore`. |
 
 ---
 
@@ -43,27 +42,35 @@
 | [x] 1.4 | Репозитории/мапперы: счета, категории, настройки, транзакции. Вставка транзакции **идемпотентная** (`ON CONFLICT DO NOTHING`). | [`packages/shared/src/supabase/mappers.ts`](./packages/shared/src/supabase/mappers.ts), `supabase/schema.sql` | Повторная вставка с тем же `message_id` дубля не создаёт. |
 | [x] 1.5 | Расчёт баланса счёта и Net Worth, форматирование денег, перевод USD → UAH по курсу. Числа идут через `decimal.js`, не float. | [`packages/shared/src/money.ts`](./packages/shared/src/money.ts), [`packages/shared/src/calculations.ts`](./packages/shared/src/calculations.ts) | Баланс совпадает с расчётом вручную. |
 | [x] 1.6 | Простой парсер **без LLM**: «кофе 150 мак», «зп 20000», «15$ такси». Определяет сумму, валюту, тип, описание. Если не понял — `needs_review`. | [`packages/shared/src/parser/regex.ts`](./packages/shared/src/parser/regex.ts), [`packages/shared/src/parser/index.ts`](./packages/shared/src/parser/index.ts) | 15 тест-фраз, мусор попадает в `needs_review`. |
-| [ ] 1.7 | Запуск бота на **GrammY** (`@grammyjs`), доступ только для двух ID, команда `/start`. Код пока ожидается в папке `apps/bot`. | `apps/bot/src/main.ts`, `apps/bot/src/auth.ts`, `apps/bot/src/handlers/*.ts` | Ты получаешь ответ. Чужие ID бот игнорирует. |
-| [ ] 1.8 | Основной сценарий: текст → парсер (Gemini → regex → `needs_review`) → кнопки выбора типа и счёта (запоминает последний) → превью → `[Изменить] [Отмена] [Сохранить]` → запись в БД. | `apps/bot/src/handlers/input.ts`, `apps/bot/src/handlers/callbacks.ts`, `apps/bot/src/keyboards.ts` | Запись появилась в Supabase. Повтор сообщения не создаёт дубль. |
-| [ ] 1.9 | Команды `/balance`, `/stats`, `/help`. | `apps/bot/src/handlers/commands.ts` | Цифры совпадают с Supabase. |
+| [x] 1.7 | Запуск бота на **GrammY** (`@grammyjs`), доступ только для двух ID, команда `/start`. Код в папке `apps/bot/src`. | `apps/bot/src/index.ts`, `apps/bot/src/config.ts`, `apps/bot/src/handlers.ts`, `apps/bot/src/db.ts` | Ты получаешь ответ. Чужие ID бот игнорирует. |
+| [x] 1.8 | Основной сценарий: текст → парсер (регулярные выражения) → превью с кнопками `[Сохранить] [Изменить] [Отмена]` → запись в БД. | `apps/bot/src/input.ts`, `apps/bot/src/index.ts` | Запись появилась в Supabase. Повтор сообщения не создаёт дубль. |
+| [x] 1.9 | Команды `/balance`, `/stats`, `/today`, `/income`, `/expense`, `/recurring`, `/backup`, `/undo`, `/cancel`, `/help`. | `apps/bot/src/handlers.ts`, `apps/bot/src/input.ts` | Цифры совпадают с Supabase. |
 | [x] 1.10 | Формула Safe-to-spend. Сутки считаются по Киеву. Если `next_income_date` не задана, дашборд/бот пишут понятное сообщение, а не ошибку. | [`packages/shared/src/calculations.ts`](./packages/shared/src/calculations.ts) | Результат совпадает с расчётом вручную. |
 
 
-**Стоп-точка v1:** дашборд уже работает локально; осталось написать `apps/bot` (GrammY). Баги, которые найдёшь, исправь до перехода к v2.
+**Стоп-точка v1:** дашборд и бот работают локально. `apps/bot` написан на GrammY, все команды реализованы.
+
+Что исправлено в боте:
+- `/balance` — показывает баланс по каждому активному счёту (1 в 1 названия из БД) и итоговую строку «Капитал». Счета с нулевым балансом скрываются. Баланс считается через `calculateAccountBalance` + `calculateNetWorth` из `@oover/shared`, не зависит от view `account_balances`.
+- `/today` — показывает доходы и расходы за сегодня (по Europe/Kyiv), а не safe-to-spend.
+- Импорты в `handlers.ts` приведены в начало файла (`cancelPending`, `startRecurringDialog`); удалён мёртвый код (`calcNetWorth`, `BalanceRow`, `fetchAccountBalances`).
+- Исправлена ошибка отсутствия экспорта `handleBalance` (бот не запускался без неё).
+
+Известные проблемы перед v2: нет уведомлений партнёру (3.1–3.2), нет деплоя бота и дашборда (3.5–3.6), перевод средств не блокируется при недостатке средств (баланс может уйти в минус — см. `bugs7.md`).
 
 
 | Команда | Описание | Статус |
 |---|---|---|
 | `/start` | Меню и список команд | [x] |
 | `/balance` | Баланс счетов и Net Worth | [x] |
-| `/stats` | Статистика: сегодня / неделя / месяц | [x] (только месяц) |
-| `/income` | Внести поступление | [ ] |
-| `/expense` | Внести трату | [ ] |
-| `/recurring` | Добавить регулярный платёж | [ ] |
+| `/stats` | Статистика: сегодня / неделя / месяц | [x] |
+| `/income` | Внести поступление | [x] |
+| `/expense` | Внести трату | [x] |
+| `/recurring` | Добавить регулярный платёж | [x] |
 | `/today` | Что внесли за сегодня | [x] |
-| `/backup` | Резервная копия данных (JSON) | [ ] |
-| `/undo` | Удалить последнюю операцию | [ ] |
-| `/cancel` | Отменить текущий ввод | [ ] |
+| `/backup` | Резервная копия данных (JSON) | [x] |
+| `/undo` | Удалить последнюю операцию | [x] |
+| `/cancel` | Отменить текущий ввод | [x] |
 | `/help` | Справка | [x] |
 
 ">
@@ -91,12 +98,12 @@
 |---|---|---|---|
 | [ ] 3.1 | Даша: уведомления партнёру о тратах (с настройкой вкл/выкл) через GrammY-бота. | `apps/bot/src/notifications.ts` | Трата Даши приходит тихим уведомлением тебе. |
 | [ ] 3.2 | Уведомление о перерасходе, когда остаток дневного лимита ≤ 30% (формула — в `packages/shared`). | `apps/bot/src/notifications.ts`, [`packages/shared/src/calculations.ts`](./packages/shared/src/calculations.ts) | Уведомление приходит один раз, не спамит. |
-| [ ] 3.3 | `/backup`: бот присылает файл с данными в Telegram. | `apps/bot/src/commands/backup.ts` | Файл пришёл и открывается. |
+| [x] 3.3 | `/backup`: бот присылает файл с данными в Telegram. | `apps/bot/src/handlers.ts` (`handleBackup`) | Файл пришёл и открывается. |
 | [x] 3.4 | Кнопка «Очистить тестовые данные» в настройках дашборда. | [`apps/web/src/views/SettingsView.tsx`](./apps/web/src/views/SettingsView.tsx) | Транзакции удалены, счета и категории остались. |
 | [ ] 3.5 | **Деплой бота** на Render или Railway. Перед выбором проверь актуальные условия бесплатного тарифа (сервис может «засыпать»; тогда нужен webhook или пинг). | `apps/bot` / настройки хостинга | Выключаешь бота на ПК, он продолжает отвечать. |
 | [ ] 3.6 | **Деплой дашборда** (или оставить локальным). Если в вебе, авторизация обязательна. | `apps/web` / настройки хостинга | Сайт открывается, без авторизации данные не видны. |
 
-**Стоп-точка v3:** бот пока не написан и деплой не готов. Проверь, что `apps/bot` написан на GrammY, уведомления о тратах работают, `/backup` работает и бот задеплоен.
+**Стоп-точка v3:** бот написан на GrammY и работает локально, `/backup` работает. Деплой бота и дашборда ещё не сделан. Проверь уведомления о тратах (3.1–3.2) и деплой (3.5–3.6).
 
 ---
 
@@ -111,9 +118,7 @@
 | 5. Календарь (сумма по дням, клик → список, подсветка перерасхода) | [x] | [`apps/web/src/views/CalendarView.tsx`](./apps/web/src/views/CalendarView.tsx) |
 | 6. Регулярные платежи и напоминания в Telegram (подтвердить/пропустить) | [x] дашборд | [`apps/web/src/views/RecurringView.tsx`](./apps/web/src/views/RecurringView.tsx); Telegram-часть — `apps/bot` |
 | 7. Цели накопления | [x] | [`apps/web/src/views/GoalsView.tsx`](./apps/web/src/views/GoalsView.tsx) |
-| 8. **Gemini LLM-парсер** (с фоллбэком на regex) | [x] | [`packages/shared/src/gemini/parse.ts`](./packages/shared/src/gemini/parse.ts), [`packages/shared/src/gemini/client.ts`](./packages/shared/src/gemini/client.ts), [`packages/shared/src/parser/index.ts`](./packages/shared/src/parser/index.ts) |
-| 9. Голосовые сообщения (Gemini Audio / Whisper) | [x] | [`packages/shared/src/gemini/transcribe.ts`](./packages/shared/src/gemini/transcribe.ts) |
-| 10. Поиск по заметкам, массовое редактирование | [x] | [`apps/web/src/views/TransactionsView.tsx`](./apps/web/src/views/TransactionsView.tsx) |
+| 8. Поиск по заметкам, массовое редактирование | [x] | [`apps/web/src/views/TransactionsView.tsx`](./apps/web/src/views/TransactionsView.tsx) |
 | 11. Борд (Kanban) | [x] | [`apps/web/src/views/BoardView.tsx`](./apps/web/src/views/BoardView.tsx) |
 | 12. Экспорт Excel/CSV/PDF | [x] дашборд | [`apps/web/src/views/SettingsView.tsx`](./apps/web/src/views/SettingsView.tsx) |
 | 13. Архивация старых данных на ПК | [ ] | — |

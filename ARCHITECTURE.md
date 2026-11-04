@@ -3,7 +3,7 @@
 Документ описывает фактическую архитектуру кода: стек, структуру монорепозитория, слои, потоки данных и правила разработки.
 Схема БД вынесена в отдельный файл: [`DATABASE.md`](./DATABASE.md). Порядок разработки — в [`ROADMAP.md`](./ROADMAP.md), правила для ИИ — в [`PROJECT_RULES.md`](./PROJECT_RULES.md).
 
-> **Статус реализации.** Этот документ описывает **текущий код** (TypeScript/React/Vite + Supabase + Gemini), а не первоначальный Python-план. Из трёх частей системы сейчас готов веб-дашборд (`apps/web`) и общий пакет (`packages/shared`); Telegram-бот (`apps/bot`) и подключение дашборда к Supabase — в работе (см. разделы 3 и 12).
+> **Статус реализации.** Этот документ описывает **текущий код** (TypeScript/React/Vite + Supabase), а не первоначальный Python-план. Из трёх частей системы сейчас готов веб-дашборд (`apps/web`) и общий пакет (`packages/shared`); Telegram-бот (`apps/bot`) и подключение дашборда к Supabase — в работе (см. разделы 3 и 12).
 
 ---
 
@@ -20,12 +20,12 @@
 └──────────┬───────────┘
            │
            ▼
-     Google Gemini (LLM-парсер + распознавание голоса)
+     
 ```
 
 | Часть | Роль | Хостинг | Статус |
 |---|---|---|---|
-| **Бот** (`apps/bot`) | Мобильный шлюз: ввод текстом/голосом, `/today`, `/balance`, `/stats`, уведомления | Render / Railway (24/7, $0) | ⏳ в работе (ROADMAP 1.7–1.9): /start, /balance, /today, /stats, ввод трат готовы |
+| **Бот** (`apps/bot`) | Мобильный шлюз: ввод текстом, `/today`, `/balance`, `/stats`, `/income`, `/expense`, `/recurring`, `/backup`, `/undo`, `/cancel`, уведомления | Render / Railway (24/7, $0) | ✅ написан на GrammY, работает локально (все команды готовы); деплой ещё не сделан |
 | **БД** (Supabase) | Единственный источник правды | Supabase free tier | ✅ схема готова (`supabase/schema.sql`), клиенты и мапперы в shared |
 | **Дашборд** (`apps/web`) | Полное управление: обзор/доходы/транзакции/борд/календарь/счета/цели/регулярные/категории/бот-симулятор/настройки | Локально (`npm run dev:web`) | ✅ работает, сейчас на `localStorage` |
 
@@ -39,11 +39,8 @@
 - **Сборка монорепозитория:** npm workspaces (`packages/*`, `apps/*`).
 - **Дашборд:** React 19 + Vite 8 + Tailwind CSS 4 (`@tailwindcss/vite`), иконки `lucide-react`, анимации `motion`.
 - **БД:** Supabase (PostgreSQL + Auth + Realtime + RLS), клиент `@supabase/supabase-js`.
-- **Бот:** GrammY (`@grammyjs/*`) — планируется в `apps/bot`.
-- **LLM / STT:** Google Gemini через `@google/genai` (LLM-парсер и распознавание голоса). Один ключ на всё.
 - **Деньги:** `decimal.js` (никакого `float`), в БД `numeric(14,2)`.
 - **Время:** хранение в UTC (`timestamptz`), но «сутки/неделя/месяц» считаются по **Europe/Kyiv** через `date-fns` + `date-fns-tz`.
-- **Валидация ответов LLM:** `zod` (проверка JSON от Gemini перед использованием).
 - **Конфиги:** корневой `.env` для секретов (шаблон — `.env.example`); несекретные настройки — в таблице `settings`.
 
 ---
@@ -102,12 +99,8 @@ OoverrFinancee/
 │           ├── time.ts             # Europe/Kyiv: границы суток, диапазоны
 │           ├── calculations.ts     # балансы, Net Worth, Safe-to-spend, сравнение
 │           ├── parser/
-│           │   ├── index.ts        # каскад parseInput: Gemini → regex → needs_review
+│           │   ├── index.ts        # каскад parseInput: regex → needs_review
 │           │   └── regex.ts        # офлайн-парсер: сумма, валюта, тип, категория, счёт
-│           ├── gemini/
-│           │   ├── client.ts       # createGeminiClient(apiKey)
-│           │   ├── parse.ts        # parseWithGemini → JSON (zod-валидация)
-│           │   └── transcribe.ts   # transcribeAudio: голос → текст
 │           └── supabase/
 │               ├── client.ts       # createBrowserClient (anon) / createServerClient (service_role)
 │               └── mappers.ts      # строки БД → типизированные модели (numeric → number)
@@ -134,10 +127,8 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
 | `money.ts` | `toDecimal`, `round2`, `sumMoney`, `convertToUah` (USD→UAH по курсу), `formatMoney` (₴/$). Только decimal.js. |
 | `time.ts` | `todayYmd`, `startOfDay/endOfDay`, `rangeForPreset` (today/yesterday/week/month/prev_month/all), `daysBetweenYmd`. Часовой пояс по умолчанию `Europe/Kyiv`. |
 | `calculations.ts` | `calculateAccountBalance`, `calculateNetWorth`, `calculateSafeToSpend`, `calculateMonthComparison`, `pendingRecurring`. |
-| `parser/index.ts` | `parseInput` — каскад: если передан Gemini-слой → пробуем LLM, при любой ошибке (`onLlmError`) → regex. Ввод не теряется. |
+| `parser/index.ts` | `parseInput` — каскад: regex-парсинг, результат с пометкой needs_review при неточном разборе. Ввод не теряется. |
 | `parser/regex.ts` | `parseWithRegex` — синонимы категорий, ключевые слова дохода, определение валюты и счёта. Без интернета. |
-| `gemini/parse.ts` | `parseWithGemini` — JSON-схема ответа + zod-валидация; при низкой уверенности `< 0.5` → `needs_review`. |
-| `gemini/transcribe.ts` | `transcribeAudio` — аудио (base64) → текст; файл нигде не сохраняется. |
 | `supabase/client.ts` | `createBrowserClient` (anon + RLS) для дашборда; `createServerClient` (service_role) для бота. |
 | `supabase/mappers.ts` | Приведение строк БД (numeric приходит строкой) к типам: `mapUser`, `mapTransaction` и т.д. |
 
@@ -158,8 +149,7 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
   → auth: ID в whitelist? (бот; нет → игнор)
   → idempotency: (telegram_chat_id, telegram_message_id) уже обработан? (да → стоп)
   → parseInput (shared):
-       gemini? → parseWithGemini (JSON + zod)
-         └ сбой/низкая уверенность → parseWithRegex (фоллбэк)
+       → parseWithRegex (офлайн, без интернета)
          └ не распознана сумма → status = needs_review
   → предлагается последний использованный счёт (можно сменить)
   → превью: [Изменить] [Отмена] [Сохранить ✅]  (если confirm_enabled)
@@ -167,12 +157,9 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
   → уведомление партнёру (если включено) + проверка дневного лимита (≤ overspend_alert_pct%)
 ```
 
-> В дашборде Gemini-слой намеренно не подключается (ключ не должен попадать в бандл) — «Быстрая операция» использует только `parseWithRegex`. Полный каскад `Gemini → regex → needs_review` предназначается боту.
+> «Быстрая операция» использует только `parseWithRegex` (офлайн, без интернета).
 
-### 6.2. Голосовое сообщение (бот)
-`голос (base64) → transcribeAudio (Gemini) → текст → файл не сохраняется → далее как 6.1` (хранится только итоговый текст).
-
-### 6.3. Расчёт балансов и Net Worth
+### 6.2. Расчёт балансов и Net Worth
 `calculateAccountBalance` = стартовый остаток + доходы − расходы ± корректировки + входящие переводы − исходящие переводы. `calculateNetWorth` = Σ балансов UAH + Σ балансов USD × курс. Один код используется в «Обзоре», «Счетах» и (в будущем) в командах бота.
 
 ### 6.4. Safe-to-spend («Свободно на сегодня»)
@@ -186,8 +173,8 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
 ## 7. Надёжность
 
 - **Идемпотентность:** в `transactions` уникальный индекс `uq_tx_telegram (telegram_chat_id, telegram_message_id)`. Повторная доставка апдейта Telegram или ретрай дубль не создаёт.
-- **Фоллбэк парсера:** каскад `Gemini → regex → needs_review`. Бот не теряет ввод ни при каких сбоях внешнего API; ошибки LLM уходят в `onLlmError` (лог).
-- **Деньги и время:** только `decimal.js` и `shared/time.ts` (Europe/Kyiv). Сбой Gemini не «проглатывается» молча — он обязан быть пойман и приведён к regex.
+- **Фоллбэк парсера:** каскад `regex → needs_review`. Бот не теряет ввод ни при каких сбоях внешнего API; ошибки уходят в лог.
+- **Деньги и время:** только `decimal.js` и `shared/time.ts` (Europe/Kyiv).
 
 ---
 
@@ -195,7 +182,7 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
 
 - Бот строго приватный: whitelist из двух Telegram ID (`ALLOWED_TELEGRAM_IDS` в `.env`). Остальным — молчание.
 - Секреты только в `.env` (в git не попадает; шаблон — `.env.example`). Никогда не в коде и не в чаты.
-- **Ключи по контексту:** `service_role` — только на сервере бота; в браузере — `anon` + RLS. `GEMINI_API_KEY` — только на сервере (бот) или в Supabase Edge Function, **никогда** в браузерном бандле.
+- **Ключи по контексту:** `service_role` — только на сервере бота; в браузере — `anon` + RLS, **никогда** в браузерном бандле.
 - Supabase RLS включён на всех таблицах: политика `authenticated_all` — авторизованный пользователь видит и меняет всё; `anon` доступа к данным не имеет.
 - Для дашборда в вебе — авторизация Supabase (email/пароль), иначе финансовые данные открыты.
 - Голосовые файлы не сохраняются — аудио сразу превращается в текст.
@@ -209,11 +196,6 @@ apps/bot  ─┘        (типы, деньги, время, формулы, п�
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=      # только сервер бота, в браузер не попадает
-
-# Google Gemini
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_TRANSCRIBE_MODEL=gemini-2.5-flash
 
 # Telegram-бот
 TELEGRAM_BOT_TOKEN=
@@ -251,8 +233,8 @@ LOG_LEVEL=info
 
 ## 12. Что готово и что в плане (соответствие ROADMAP)
 
-- ✅ **Готово:** дашборд (`apps/web`) на React/Vite, подключён к Supabase (loadStore, мутации, мапперы); общий пакет (`packages/shared`): типы, деньги, время, формулы, regex-парсер, Gemini-парсер/транскрипция, Supabase-клиенты/мапперы; схема БД (`schema.sql`); Telegram-бот (`apps/bot`, `/start`, `/help`, `/balance`, `/today`, `/stats`, ввод трат текстом). Практически все фичи v2 и v4 по дашборду.
-- ⏳ **В плане:** команды бота `/income`, `/expense`, `/recurring`, `/backup`, `/undo`, `/cancel`; голосовой ввод; уведомления партнёру и `/backup` (3.1–3.3); Realtime-подписку дашборда; деплой бота и дашборда (3.5–3.6); архивация старых данных (v4.13).
+- ✅ **Готово:** дашборд (`apps/web`) на React/Vite, подключён к Supabase (loadStore, мутации, мапперы); общий пакет (`packages/shared`): типы, деньги, время, формулы, regex-парсер, Supabase-клиенты/мапперы; схема БД (`schema.sql`); Telegram-бот (`apps/bot`, все команды: `/start`, `/help`, `/balance`, `/today`, `/stats`, `/income`, `/expense`, `/recurring`, `/backup`, `/undo`, `/cancel`, ввод трат текстом с превью и кнопками). Практически все фичи v2 и v4 по дашборду.
+- ⏳ **В плане:** уведомления партнёру о тратах и перерасходе (3.1–3.2); Realtime-подписку дашборда; деплой бота и дашборда (3.5–3.6); архивация старых данных (v4.13).
 
 Актуальный статус каждого шага — в [`ROADMAP.md`](./ROADMAP.md).
 
@@ -260,7 +242,7 @@ LOG_LEVEL=info
 - **Экраны (`views/`):** по одному компоненту на вкладку. Все суммы считаются функциями из `@oover/shared`, а не вручную.
 - **Модалки (`components/`):** добавление/редактирование транзакции, перевод, ревизия счёта, взнос в цель, быстрый ввод через парсер.
 - **Уведомления:** всплывающий «тост» (например, уведомление партнёру) в `App.tsx`.
-- **Секреты:** `vite.config.ts` читает корневой `.env` и пробрасывает в бандл **только** `SUPABASE_URL` и `SUPABASE_ANON_KEY`. `SUPABASE_SERVICE_ROLE_KEY` и `GEMINI_API_KEY` в браузер не попадают никогда.
+- **Секреты:** `vite.config.ts` читает корневой `.env` и пробрасывает в бандл **только** `SUPABASE_URL` и `SUPABASE_ANON_KEY`. `SUPABASE_SERVICE_ROLE_KEY` в браузер не попадает никогда.
 - **Хранилище данных:** **Supabase — единственный источник правды.** Дашборд читает/пишет таблицы через `services/data.ts` (anon-ключ + RLS), авторизация — Supabase Auth (email/пароль, экран входа `components/AuthGate.tsx`). `localStorage` больше не используется для данных; экспорт CSV/JSON остался в `services/storage.ts` только для скачивания файлов.
 
 
